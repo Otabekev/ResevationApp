@@ -131,7 +131,7 @@ async def test_concurrent_booking_single_winner():
         await conn.execute(text(
             "ALTER TABLE bookings ADD CONSTRAINT no_overlapping_bookings "
             "EXCLUDE USING gist (staff_id WITH =, "
-            "tsrange((booking_date + start_time), (booking_date + end_time)) WITH &&) "
+            "(tsrange((booking_date + start_time)::timestamp, (booking_date + end_time)::timestamp)) WITH &&) "
             "WHERE (status IN ('pending','confirmed') AND staff_id IS NOT NULL)"
         ))
 
