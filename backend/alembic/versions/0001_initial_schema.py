@@ -14,11 +14,9 @@ depends_on = None
 
 
 def upgrade() -> None:
-    # ── Enums ────────────────────────────────────────────────────────────────
-    op.execute("CREATE TYPE user_role AS ENUM ('super_admin', 'business_owner', 'staff', 'customer')")
-    op.execute("CREATE TYPE business_status AS ENUM ('pending', 'active', 'trial', 'suspended', 'blocked')")
-    op.execute("CREATE TYPE booking_status AS ENUM ('pending', 'confirmed', 'completed', 'cancelled_by_customer', 'cancelled_by_business', 'no_show', 'rescheduled')")
-    op.execute("CREATE TYPE subscription_plan AS ENUM ('trial', 'basic', 'premium')")
+    # Postgres enum types are created automatically by SQLAlchemy when their
+    # owning table is created below. Each enum is used by exactly one table, so
+    # no manual `CREATE TYPE` (which would collide with the auto-creation) is needed.
 
     # ── users ────────────────────────────────────────────────────────────────
     op.create_table(
@@ -29,7 +27,7 @@ def upgrade() -> None:
         sa.Column("name", sa.String(255), nullable=False),
         sa.Column("username", sa.String(100), nullable=True),
         sa.Column("hashed_password", sa.String(255), nullable=True),
-        sa.Column("role", sa.Enum("super_admin", "business_owner", "staff", "customer", name="user_role", create_type=False), nullable=False, server_default="customer"),
+        sa.Column("role", sa.Enum("super_admin", "business_owner", "staff", "customer", name="user_role"), nullable=False, server_default="customer"),
         sa.Column("language", sa.String(5), server_default="uz"),
         sa.Column("is_active", sa.Boolean(), server_default="true"),
         sa.Column("created_at", sa.DateTime(timezone=True), server_default=sa.func.now()),
@@ -72,7 +70,7 @@ def upgrade() -> None:
         sa.Column("phone", sa.String(20), nullable=False),
         sa.Column("telegram_username", sa.String(100), nullable=True),
         sa.Column("instagram_link", sa.String(255), nullable=True),
-        sa.Column("status", sa.Enum("pending", "active", "trial", "suspended", "blocked", name="business_status", create_type=False), nullable=False, server_default="pending"),
+        sa.Column("status", sa.Enum("pending", "active", "trial", "suspended", "blocked", name="business_status"), nullable=False, server_default="pending"),
         sa.Column("is_online_booking_enabled", sa.Boolean(), server_default="true"),
         sa.Column("min_advance_booking_minutes", sa.Integer(), server_default="60"),
         sa.Column("max_advance_booking_days", sa.Integer(), server_default="30"),
@@ -224,7 +222,7 @@ def upgrade() -> None:
         sa.Column("booking_date", sa.Date(), nullable=False),
         sa.Column("start_time", sa.Time(), nullable=False),
         sa.Column("end_time", sa.Time(), nullable=False),
-        sa.Column("status", sa.Enum("pending", "confirmed", "completed", "cancelled_by_customer", "cancelled_by_business", "no_show", "rescheduled", name="booking_status", create_type=False), nullable=False, server_default="pending"),
+        sa.Column("status", sa.Enum("pending", "confirmed", "completed", "cancelled_by_customer", "cancelled_by_business", "no_show", "rescheduled", name="booking_status"), nullable=False, server_default="pending"),
         sa.Column("notes", sa.Text(), nullable=True),
         sa.Column("cancellation_reason", sa.Text(), nullable=True),
         sa.Column("reminder_24h_sent", sa.Boolean(), server_default="false"),
@@ -273,7 +271,7 @@ def upgrade() -> None:
         "subscriptions",
         sa.Column("id", sa.Integer(), primary_key=True),
         sa.Column("business_id", sa.Integer(), sa.ForeignKey("businesses.id"), nullable=False),
-        sa.Column("plan", sa.Enum("trial", "basic", "premium", name="subscription_plan", create_type=False), nullable=False, server_default="trial"),
+        sa.Column("plan", sa.Enum("trial", "basic", "premium", name="subscription_plan"), nullable=False, server_default="trial"),
         sa.Column("started_at", sa.DateTime(timezone=True), nullable=False),
         sa.Column("expires_at", sa.DateTime(timezone=True), nullable=True),
         sa.Column("is_active", sa.Boolean(), server_default="true"),
