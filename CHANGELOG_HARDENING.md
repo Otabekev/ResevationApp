@@ -170,8 +170,16 @@ Legend: ✅ done & test-proven · 🟡 done, needs Postgres to prove · ⬜ pend
 
 ---
 
-## FINAL SUITE STATUS: **46 passing, 1 skipped** (Postgres concurrency — runs green in CI).
+## SUITE STATUS: **46 passing locally (1 Postgres test skipped); full suite GREEN in CI.**
 
-### Pending-Postgres (written, prove in CI or with a DB URL): A7 (RLS), D1/D2 (exclusion constraint), D7, E3.
-### Deferred (your call / need infra): E5 Redis cache, I1/I2 full brand redesign, K6 real prod URLs.
+### ✅ Proven on real Postgres in GitHub Actions (run #3, branch `hardening`):
+- **D1/D2** — migration applies the `btree_gist` exclusion constraint; concurrency test: 8 parallel bookings → exactly 1 winner.
+- **D7** — `staff_services` unique constraint applies.
+- **E3** — composite indexes apply.
+- **K** — migrations `upgrade head` → `downgrade base` cleanly (reversible).
+- CI fixes en route: `0001` enum double-creation (DuplicateObjectError) and `0002` exclusion-constraint parenthesization.
+
+### ⬜ Still open:
+- **A7 (RLS)** — NOT implemented (documented only). App-level tenant isolation is proven (12 A tests); RLS is defense-in-depth and remains the one unbuilt audit item.
+- Deferred (your call / infra): E5 Redis cache, I1/I2 remaining per-page UI polish, K6 real prod URLs, G4 Sentry.
 
