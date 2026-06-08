@@ -13,7 +13,8 @@ import pytest
 
 from app.config import settings
 from app.services.auth_service import (
-    create_access_token, create_refresh_token, verify_telegram_init_data,
+    create_access_token, create_refresh_token,
+    verify_telegram_init_data, verify_telegram_login_widget,
 )
 from tests.factories import create_user
 
@@ -114,6 +115,59 @@ def test_validate_config_ok_in_development():
 
     # Default test env is development → must not raise regardless of secrets.
     validate_runtime_config(settings)
+
+
+# ── B9: Telegram Login Widget (web/PWA flow, NOT Mini App) ────────────────────
+
+def make_widget_payload(bot_token: str, user: dict, auth_date: int | None = None) -> dict:
+    """Build a Telegram-Login-Widget-shaped payload. Note the different crypto
+    from Mini App initData: secret = SHA256(bot_token), not HMAC('WebAppData', ...)."""
+    auth_date = auth_date or int(time.time())
+    data = {**user, "auth_date": auth_date}
+    # Exclude None and the (not-yet-set) `hash` from the data-check string.
+    data_check_pairs = {k: v for k, v in data.items() if v is not None}
+    data_check = "\n".join(f"{k}={data_check_pairs[k]}" for k in sorted(data_check_pairs))
+    secret = hashlib.sha256(bot_token.encode()).digest()
+    h = hmac.new(secret, data_check.encode(), hashlib.sha256).hexdigest()
+    return {**data, "hash": h}
+
+
+async def test_widget_payload_accepted(client):
+    payload = make_widget_payload(
+        settings.telegram_bot_token,
+        {"id": 555111555, "first_name": "Otabek", "username": "otabek_web"},
+    )
+    resp = await client.post(f"{API}/auth/telegram-widget", json=payload)
+    assert resp.status_code == 200, resp.text
+    assert "access_token" in resp.json()
+
+
+async def test_widget_forged_hash_rejected(client):
+    payload = make_widget_payload(
+        settings.telegram_bot_token,
+        {"id": 555111556, "first_name": "Forged"},
+    )
+    payload["hash"] = "0" * 64
+    resp = await client.post(f"{API}/auth/telegram-widget", json=payload)
+    assert resp.status_code == 401, resp.text
+
+
+def test_widget_expired_rejected_in_production(monkeypatch):
+    monkeypatch.setattr(settings, "environment", "production")
+    old = int(time.time()) - 2 * 86400  # 2 days ago
+    payload = make_widget_payload(
+        settings.telegram_bot_token,
+        {"id": 1, "first_name": "Stale"},
+        auth_date=old,
+    )
+    assert verify_telegram_login_widget(payload) is None
+
+
+def test_widget_rejected_when_token_unset(monkeypatch):
+    # Parity with B2: an empty bot token must NOT be a valid signing key.
+    monkeypatch.setattr(settings, "telegram_bot_token", "")
+    payload = make_widget_payload("", {"id": 1, "first_name": "X"})
+    assert verify_telegram_login_widget(payload) is None
 
 
 # ── B7: password hashing must actually work (passlib/bcrypt compat) ───────────

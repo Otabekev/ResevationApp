@@ -16,6 +16,7 @@ from app.services.auth_service import (
     create_refresh_token,
     get_or_create_user_from_telegram,
     verify_telegram_init_data,
+    verify_telegram_login_widget,
 )
 
 router = APIRouter(prefix="/auth", tags=["auth"])
@@ -59,6 +60,56 @@ async def auth_telegram(request: Request, body: TelegramAuthRequest, db: AsyncSe
         language = "uz"
 
     user = await get_or_create_user_from_telegram(db, telegram_id, name, username, language)
+    await db.commit()
+
+    return TokenResponse(
+        access_token=create_access_token(user.id),
+        refresh_token=create_refresh_token(user.id),
+        user_id=user.id,
+        role=user.role,
+        name=user.name,
+        language=user.language,
+    )
+
+
+class TelegramWidgetAuthRequest(BaseModel):
+    """Payload from Telegram Login Widget (https://core.telegram.org/widgets/login).
+    `extra=allow` so any future Telegram-added fields don't break the hash check."""
+    id: int
+    first_name: str
+    last_name: str | None = None
+    username: str | None = None
+    photo_url: str | None = None
+    auth_date: int
+    hash: str
+
+    model_config = {"extra": "allow"}
+
+
+@router.post("/telegram-widget", response_model=TokenResponse)
+@limiter.limit("20/minute")
+async def auth_telegram_widget(
+    request: Request,
+    body: TelegramWidgetAuthRequest,
+    db: AsyncSession = Depends(get_db),
+):
+    """
+    Authenticates a business owner via the Telegram Login Widget (web flow,
+    NOT Mini App). The dashboard is a normal browser PWA; this endpoint is
+    what its `data-onauth` callback POSTs the verified Telegram identity to.
+    """
+    verified = verify_telegram_login_widget(body.model_dump(exclude_none=True))
+    if verified is None:
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid Telegram data")
+
+    name = f"{verified['first_name']} {verified.get('last_name') or ''}".strip()
+    user = await get_or_create_user_from_telegram(
+        db,
+        telegram_id=int(verified["id"]),
+        name=name,
+        username=verified.get("username"),
+        language="uz",  # Widget doesn't supply language_code; user can change in Settings.
+    )
     await db.commit()
 
     return TokenResponse(

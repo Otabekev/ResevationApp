@@ -2,6 +2,7 @@ import { useEffect, useState } from "react";
 import { getMyBusinesses, getBookings, getAnalytics, getServices } from "../api/client";
 import useStore from "../store/useStore";
 import { useT } from "../i18n";
+import InstallBanner from "../components/InstallBanner";
 import dayjs from "dayjs";
 
 const STATUS_BADGE = {
@@ -98,6 +99,7 @@ export default function Dashboard() {
 
   return (
     <div className="animate-in">
+      <InstallBanner />
       <div className="page-header">
         <h1 className="page-title">{t("dashboard")}</h1>
         {businesses.length > 1 && (

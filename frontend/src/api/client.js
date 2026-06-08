@@ -33,8 +33,16 @@ api.interceptors.response.use(
 export default api;
 
 // ── Auth ──────────────────────────────────────────────────────────────────────
+// `authTelegram` is the Mini App initData flow — no longer used by the web
+// dashboard (we use the Login Widget now), kept for any future Mini App surface
+// and so the existing /auth/telegram backend tests stay meaningful.
 export const authTelegram = (initData) =>
   api.post("/auth/telegram", { init_data: initData }).then((r) => r.data);
+
+// Standalone Telegram Login Widget callback — what the web dashboard uses.
+// `payload` is the user object Telegram passes to `data-onauth`.
+export const authTelegramWidget = (payload) =>
+  api.post("/auth/telegram-widget", payload).then((r) => r.data);
 
 export const getMe = () => api.get("/auth/me").then((r) => r.data);
 

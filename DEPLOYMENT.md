@@ -103,14 +103,22 @@ python -m scripts.seed_categories
    `https://resevationapp-backend-production.up.railway.app` — `/api/*` is proxied to it,
    so the browser stays same-origin and **no CORS is needed**.
 5. Environment Variables (Project Settings → Environment Variables):
+   - `VITE_TELEGRAM_BOT_USERNAME=QulayNavbat_bot` (the bot whose @-handle owners log in with — without the leading `@`)
    - `VITE_DEV_BYPASS_TELEGRAM=false` (production)
    - Leave `VITE_API_BASE_URL` UNSET — the rewrite handles routing.
 6. Deploy. Copy the production URL (e.g. `https://rezerv.vercel.app`).
 7. Back on Railway → backend service → Variables → set
    `ALLOWED_ORIGINS=https://<your>.vercel.app` (defense-in-depth + satisfies
    `validate_runtime_config`). Redeploy backend.
-8. Smoke test: open `https://<your>.vercel.app/health` — should return
+8. Smoke test: open `https://<your>.vercel.app/api/v1/health` — should return
    `{"status":"ok","db":true,"platform":"Rezerv"}` (proves the rewrite works).
+9. **BotFather one-time setup** for the Login Widget:
+   - Telegram → [@BotFather](https://t.me/BotFather) → `/setdomain` → choose
+     `@QulayNavbat_bot` → enter the Vercel production domain (e.g. `rezerv.vercel.app`)
+     **without `https://`**.
+   - Constraint: BotFather only allows ONE domain per bot. Preview deploys
+     cannot use the Login Widget unless you create a separate staging bot.
+     Acceptable for the early validation phase.
 
 ---
 

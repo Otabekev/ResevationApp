@@ -85,6 +85,47 @@ def verify_telegram_init_data(init_data: str) -> dict | None:
         return None
 
 
+def verify_telegram_login_widget(payload: dict) -> dict | None:
+    """
+    Validates a Telegram Login Widget callback payload.
+
+    Different from Mini App initData in three security-critical ways:
+      • Secret key is plain SHA256(bot_token), NOT HMAC_SHA256("WebAppData", bot_token).
+      • Payload is a flat dict (id, first_name, last_name?, username?, photo_url?,
+        auth_date, hash) — no nested JSON `user` field.
+      • Data-check string is built from key=value pairs sorted by key, EXCLUDING
+        the `hash` itself and any None values.
+
+    Reusing verify_telegram_init_data here would silently accept forged payloads,
+    so this is a deliberate sibling. Same defensive shape: fail closed on empty
+    token, production-only freshness window (24h — widget logins are infrequent).
+    """
+    try:
+        if not settings.telegram_bot_token:
+            return None
+
+        data = {k: v for k, v in payload.items() if v is not None and k != "hash"}
+        received_hash = payload.get("hash")
+        if not received_hash:
+            return None
+
+        data_check = "\n".join(f"{k}={data[k]}" for k in sorted(data))
+        secret_key = hashlib.sha256(settings.telegram_bot_token.encode()).digest()
+        expected_hash = hmac.new(secret_key, data_check.encode(), hashlib.sha256).hexdigest()
+
+        if not hmac.compare_digest(received_hash, expected_hash):
+            return None
+
+        # Reject stale widget payloads (24-hour window in production).
+        auth_date = int(data.get("auth_date", 0))
+        if settings.is_production and (time.time() - auth_date) > 86400:
+            return None
+
+        return data
+    except Exception:
+        return None
+
+
 async def get_or_create_user_from_telegram(
     db: AsyncSession,
     telegram_id: int,

@@ -1,6 +1,6 @@
 import { useEffect, useState } from "react";
 import { BrowserRouter, Navigate, Route, Routes } from "react-router-dom";
-import { authTelegram, getMe } from "./api/client";
+import { getMe } from "./api/client";
 import useStore from "./store/useStore";
 import Layout from "./components/Layout";
 import Dashboard from "./pages/Dashboard";
@@ -14,28 +14,22 @@ import Settings from "./pages/Settings";
 import AdminPanel from "./pages/AdminPanel";
 import Login from "./pages/Login";
 
-const DEV_BYPASS = import.meta.env.VITE_DEV_BYPASS_TELEGRAM === "true";
-
 export default function App() {
   const { isAuthenticated, setAuth, user } = useStore();
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
+    // Rezerv is a real web PWA — there's no Mini App entry point any more.
+    // We hydrate from a stored JWT (set either by the Telegram Login Widget
+    // callback on /login or by a dev-mode token paste).
     const init = async () => {
       try {
-        // Telegram Mini App auth
-        const tg = window.Telegram?.WebApp;
-        if (tg?.initData && !DEV_BYPASS) {
-          const data = await authTelegram(tg.initData);
-          setAuth({ id: data.user_id, name: data.name, role: data.role, language: data.language }, data.access_token);
-          tg.ready();
-          tg.expand();
-        } else if (localStorage.getItem("access_token")) {
+        if (localStorage.getItem("access_token")) {
           const me = await getMe();
           setAuth(me, localStorage.getItem("access_token"));
         }
       } catch {
-        // Not authenticated
+        // Not authenticated — Login screen will render.
       } finally {
         setLoading(false);
       }
@@ -46,7 +40,7 @@ export default function App() {
   if (loading) {
     return (
       <div style={{ display: "flex", alignItems: "center", justifyContent: "center", height: "100vh" }}>
-        <div style={{ fontSize: 32 }}>⏳</div>
+        <div className="skeleton" style={{ width: 160, height: 24, borderRadius: "var(--radius-sm)" }} />
       </div>
     );
   }
