@@ -93,7 +93,7 @@ export default function Bookings() {
 
   const svc = (key, value) => setForm((f) => ({ ...f, [key]: value }));
 
-  if (!activeBusiness) return <p style={{ padding: 24, color: "var(--gray-500)" }}>Select a business first.</p>;
+  if (!activeBusiness) return <p style={{ padding: "var(--space-6)", color: "var(--gray-500)" }}>{t("select_business_first")}</p>;
 
   return (
     <div>
@@ -105,14 +105,14 @@ export default function Bookings() {
       </div>
 
       {/* Filters */}
-      <div style={{ display: "flex", gap: 10, marginBottom: 16, flexWrap: "wrap" }}>
+      <div style={{ display: "flex", gap: "var(--space-3)", marginBottom: "var(--space-4)", flexWrap: "wrap" }}>
         <input
           type="date" value={date}
           onChange={(e) => setDate(e.target.value)}
           style={{ width: "auto" }}
         />
         <select value={statusFilter} onChange={(e) => setStatusFilter(e.target.value)} style={{ width: "auto" }}>
-          <option value="">All statuses</option>
+          <option value="">{t("all_statuses")}</option>
           {STATUSES.map((s) => <option key={s} value={s}>{t(s) || s}</option>)}
         </select>
         <button className="btn btn-secondary btn-sm" onClick={() => setDate(dayjs().format("YYYY-MM-DD"))}>
@@ -125,22 +125,22 @@ export default function Bookings() {
       ) : bookings.length === 0 ? (
         <div className="card empty-state">{t("no_data")}</div>
       ) : (
-        <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
+        <div style={{ display: "flex", flexDirection: "column", gap: "var(--space-3)" }}>
           {bookings.map((b) => (
             <div key={b.id} className="card">
               <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start" }}>
                 <div>
-                  <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 4 }}>
-                    <span style={{ fontWeight: 700, fontSize: 16 }}>{b.start_time?.slice(0, 5)}</span>
-                    <span style={{ fontSize: 13, color: "var(--gray-500)" }}>→ {b.end_time?.slice(0, 5)}</span>
+                  <div style={{ display: "flex", alignItems: "center", gap: "var(--space-2)", marginBottom: "var(--space-1)" }}>
+                    <span style={{ fontWeight: 700, fontSize: "var(--text-md)" }}>{b.start_time?.slice(0, 5)}</span>
+                    <span style={{ fontSize: "var(--text-sm)", color: "var(--gray-500)" }}>→ {b.end_time?.slice(0, 5)}</span>
                     <span className={`badge ${STATUS_BADGE[b.status] || ""}`}>{t(b.status) || b.status}</span>
-                    {b.was_auto_assigned && <span style={{ fontSize: 11, color: "var(--gray-400)" }}>auto</span>}
+                    {b.was_auto_assigned && <span style={{ fontSize: "var(--text-xs)", color: "var(--gray-400)" }}>{t("auto_assigned")}</span>}
                   </div>
                   <div style={{ fontWeight: 600 }}>{b.customer_name}</div>
-                  <div style={{ fontSize: 13, color: "var(--gray-500)" }}>{b.customer_phone}</div>
-                  {b.notes && <div style={{ fontSize: 13, color: "var(--gray-500)", marginTop: 4 }}>💬 {b.notes}</div>}
+                  <div style={{ fontSize: "var(--text-sm)", color: "var(--gray-500)" }}>{b.customer_phone}</div>
+                  {b.notes && <div style={{ fontSize: "var(--text-sm)", color: "var(--gray-500)", marginTop: "var(--space-1)" }}>💬 {b.notes}</div>}
                 </div>
-                <div style={{ display: "flex", gap: 6, flexWrap: "wrap", justifyContent: "flex-end" }}>
+                <div style={{ display: "flex", gap: "var(--space-2)", flexWrap: "wrap", justifyContent: "flex-end" }}>
                   {b.status === "pending" && (
                     <button className="btn btn-primary btn-sm" onClick={() => handleStatus(b.id, "confirmed")}>
                       ✅ {t("confirm")}
@@ -154,7 +154,7 @@ export default function Bookings() {
                       <button className="btn btn-secondary btn-sm" onClick={() => handleStatus(b.id, "no_show")} title={t("no_show")}>
                         🚫
                       </button>
-                      <button className="btn btn-danger btn-sm" onClick={() => handleStatus(b.id, "cancelled_by_business")} title={t("cancel")}>
+                      <button className="btn btn-danger btn-sm" onClick={() => handleStatus(b.id, "cancelled_by_business")} title={t("cancelled_by_business")}>
                         ✕
                       </button>
                     </>
@@ -178,7 +178,7 @@ export default function Bookings() {
               <div className="form-group">
                 <label>{t("service")} *</label>
                 <select required value={form.service_id} onChange={(e) => svc("service_id", e.target.value)}>
-                  <option value="">Select service...</option>
+                  <option value="">{t("select_service")}</option>
                   {services.filter((s) => s.is_active).map((s) => (
                     <option key={s.id} value={s.id}>
                       {s[`name_${lang}`] || s.name_uz} ({s.duration_minutes} {t("min")})
@@ -189,13 +189,13 @@ export default function Bookings() {
               <div className="form-group">
                 <label>{t("staff_member")}</label>
                 <select value={form.staff_id} onChange={(e) => svc("staff_id", e.target.value)}>
-                  <option value="">Any available</option>
+                  <option value="">{t("any_available")}</option>
                   {staffList.filter((s) => s.is_active).map((s) => (
                     <option key={s.id} value={s.id}>{s.name}</option>
                   ))}
                 </select>
               </div>
-              <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12 }}>
+              <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "var(--space-3)" }}>
                 <div className="form-group">
                   <label>{t("date")} *</label>
                   <input required type="date" value={form.booking_date}
@@ -211,21 +211,21 @@ export default function Bookings() {
                 <label>{t("customer")} *</label>
                 <input required value={form.customer_name}
                   onChange={(e) => svc("customer_name", e.target.value)}
-                  placeholder="Full name" />
+                  placeholder={t("full_name")} />
               </div>
               <div className="form-group">
                 <label>{t("phone")} *</label>
                 <input required value={form.customer_phone}
                   onChange={(e) => svc("customer_phone", e.target.value)}
-                  placeholder="+998901234567" />
+                  placeholder={t("phone_placeholder")} />
               </div>
               <div className="form-group">
                 <label>{t("notes")}</label>
                 <textarea rows={2} value={form.notes}
                   onChange={(e) => svc("notes", e.target.value)} />
               </div>
-              {modalError && <p style={{ color: "var(--danger)", fontSize: 13, marginBottom: 12 }}>{modalError}</p>}
-              <div style={{ display: "flex", gap: 8, justifyContent: "flex-end" }}>
+              {modalError && <p style={{ color: "var(--danger)", fontSize: "var(--text-sm)", marginBottom: "var(--space-3)" }}>{modalError}</p>}
+              <div style={{ display: "flex", gap: "var(--space-2)", justifyContent: "flex-end" }}>
                 <button type="button" className="btn btn-secondary" onClick={() => setShowModal(false)}>
                   {t("cancel")}
                 </button>

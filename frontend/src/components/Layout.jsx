@@ -12,6 +12,31 @@ const NAV_ITEMS = [
   { path: "/settings", icon: "⚙️", key: "settings", mobile: true },
 ];
 
+// Native language names so a user always recognises their own language.
+const LANGS = [
+  { code: "uz", label: "O‘zbekcha" },
+  { code: "ru", label: "Русский" },
+  { code: "en", label: "English" },
+];
+
+function LanguageSwitcher({ className }) {
+  const { lang, setLang } = useStore();
+  return (
+    <div className={`lang-switcher ${className || ""}`}>
+      <span aria-hidden className="lang-switcher-icon">🌐</span>
+      <select
+        aria-label="Language"
+        value={lang}
+        onChange={(e) => setLang(e.target.value)}
+      >
+        {LANGS.map((l) => (
+          <option key={l.code} value={l.code}>{l.label}</option>
+        ))}
+      </select>
+    </div>
+  );
+}
+
 export default function Layout({ children }) {
   const { user, lang } = useStore();
   const t = useT(lang);
@@ -44,17 +69,23 @@ export default function Layout({ children }) {
               key={item.path}
               to={item.path}
               end={item.path === "/"}
+              aria-label={t(item.key)}
+              title={t(item.key)}
               className={({ isActive }) => `nav-item${isActive ? " active" : ""}`}
             >
-              <span>{item.icon}</span>
+              <span aria-hidden>{item.icon}</span>
               {t(item.key)}
             </NavLink>
           ))}
         </nav>
-        <div style={{ padding: "16px", fontSize: 13, color: "#6b7280" }}>
-          {user?.name}
+        <div className="sidebar-footer">
+          <LanguageSwitcher className="lang-switcher-desktop" />
+          {user?.name && <div className="sidebar-user">{user.name}</div>}
         </div>
       </aside>
+
+      {/* Mobile floating language control (sidebar is hidden under 768px) */}
+      <LanguageSwitcher className="lang-switcher-mobile" />
 
       {/* Main content */}
       <main className="main-content">{children}</main>
@@ -66,9 +97,10 @@ export default function Layout({ children }) {
             key={item.path}
             to={item.path}
             end={item.path === "/"}
+            aria-label={t(item.key)}
             className={({ isActive }) => `bottom-nav-item${isActive ? " active" : ""}`}
           >
-            <span>{item.icon}</span>
+            <span aria-hidden>{item.icon}</span>
             {t(item.key)}
           </NavLink>
         ))}

@@ -87,9 +87,9 @@ export default function Dashboard() {
       <div>
         <div className="page-header"><h1 className="page-title">{t("dashboard")}</h1></div>
         <div className="card empty-state">
-          <div style={{ fontSize: 48, marginBottom: 16 }}>🏪</div>
-          <h2 style={{ marginBottom: 8, fontSize: "var(--text-lg)" }}>{t("no_business_title")}</h2>
-          <p style={{ color: "var(--gray-500)", marginBottom: 24 }}>{t("no_business_desc")}</p>
+          <div style={{ fontSize: 48, marginBottom: "var(--space-4)" }}>🏪</div>
+          <h2 style={{ marginBottom: "var(--space-2)", fontSize: "var(--text-lg)" }}>{t("no_business_title")}</h2>
+          <p style={{ color: "var(--gray-500)", marginBottom: "var(--space-6)" }}>{t("no_business_desc")}</p>
           <a href="/setup" className="btn btn-primary">{t("register_business")}</a>
         </div>
       </div>
@@ -140,11 +140,11 @@ export default function Dashboard() {
       )}
 
       <div className="card">
-        <h2 style={{ fontSize: "var(--text-md)", fontWeight: 700, marginBottom: 16, letterSpacing: "-0.01em" }}>
+        <h2 style={{ fontSize: "var(--text-md)", fontWeight: 700, marginBottom: "var(--space-4)", letterSpacing: "-0.01em" }}>
           {t("todays_schedule")} · {dayjs().format("DD MMMM")}
         </h2>
         {todayBookings.length === 0 ? (
-          <p className="empty-state" style={{ padding: "28px 0" }}>{t("no_data")}</p>
+          <p className="empty-state" style={{ padding: "var(--space-6) 0" }}>{t("no_data")}</p>
         ) : (
           <table className="table">
             <thead>
@@ -165,7 +165,7 @@ export default function Dashboard() {
                   </td>
                   <td>{serviceNames[b.service_id] || `#${b.service_id}`}</td>
                   <td>
-                    <span className={`badge ${STATUS_BADGE[b.status] || ""}`}>{t(b.status) || b.status}</span>
+                    <span className={`badge ${STATUS_BADGE[b.status] || ""}`}>{t(b.status)}</span>
                   </td>
                 </tr>
               ))}

@@ -23,9 +23,12 @@ export default function BusinessSetup() {
   });
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState("");
+  const [loadingCategories, setLoadingCategories] = useState(true);
 
   useEffect(() => {
-    getCategories().then(setCategories);
+    getCategories()
+      .then(setCategories)
+      .finally(() => setLoadingCategories(false));
   }, []);
 
   const handleSubmit = async (e) => {
@@ -37,7 +40,7 @@ export default function BusinessSetup() {
       setActiveBusiness(biz);
       navigate("/");
     } catch (err) {
-      setError(err.response?.data?.detail || "Error creating business");
+      setError(err.response?.data?.detail || t("error_creating_business"));
     } finally {
       setSaving(false);
     }
@@ -52,21 +55,25 @@ export default function BusinessSetup() {
         <form onSubmit={handleSubmit}>
           <div className="form-group">
             <label>{t("category")} *</label>
-            <select required value={form.category_id} onChange={(e) => setForm({ ...form, category_id: e.target.value })}>
-              <option value="">Select category...</option>
+            <select required value={form.category_id} disabled={loadingCategories}
+              onChange={(e) => setForm({ ...form, category_id: e.target.value })}>
+              <option value="">{loadingCategories ? t("loading") : t("select_category")}</option>
               {categories.map((c) => (
                 <option key={c.id} value={c.id}>
                   {c.icon} {c[`name_${lang}`] || c.name_uz}
                 </option>
               ))}
             </select>
+            {!loadingCategories && categories.length === 0 && (
+              <p className="muted" style={{ fontSize: "var(--text-sm)" }}>{t("no_data")}</p>
+            )}
           </div>
           <div className="form-group">
             <label>{t("business_name")} *</label>
             <input required value={form.name} onChange={(e) => setForm({ ...form, name: e.target.value })}
               placeholder="e.g. Barber Style, Dental Plus..." />
           </div>
-          <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12 }}>
+          <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "var(--space-3)" }}>
             <div className="form-group">
               <label>{t("region")}</label>
               <input value={form.region} onChange={(e) => setForm({ ...form, region: e.target.value })} />
@@ -86,24 +93,28 @@ export default function BusinessSetup() {
             <input required value={form.phone} onChange={(e) => setForm({ ...form, phone: e.target.value })}
               placeholder="+998901234567" />
           </div>
-          <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12 }}>
+          <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "var(--space-3)" }}>
             <div className="form-group">
-              <label>Telegram username</label>
+              <label>{t("telegram_username")}</label>
               <input value={form.telegram_username} onChange={(e) => setForm({ ...form, telegram_username: e.target.value })}
                 placeholder="@yourbusiness" />
             </div>
             <div className="form-group">
-              <label>Instagram</label>
+              <label>{t("instagram")}</label>
               <input value={form.instagram_link} onChange={(e) => setForm({ ...form, instagram_link: e.target.value })}
                 placeholder="instagram.com/..." />
             </div>
           </div>
           <div className="form-group">
-            <label>Description</label>
+            <label>{t("description")}</label>
             <textarea rows={3} value={form.description}
               onChange={(e) => setForm({ ...form, description: e.target.value })} />
           </div>
-          {error && <p style={{ color: "var(--danger)", fontSize: 13, marginBottom: 12 }}>{error}</p>}
+          {error && (
+            <div className="form-group">
+              <p style={{ color: "var(--danger)", fontSize: "var(--text-sm)" }}>{error}</p>
+            </div>
+          )}
           <button type="submit" className="btn btn-primary btn-full" disabled={saving}>
             {saving ? t("loading") : t("register_business")}
           </button>

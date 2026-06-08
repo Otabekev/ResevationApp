@@ -298,6 +298,63 @@ input:disabled, select:disabled { background: var(--gray-100); color: var(--gray
 @keyframes fade-in-up { from { opacity: 0; transform: translateY(8px); } to { opacity: 1; transform: translateY(0); } }
 .animate-in { animation: fade-in-up var(--dur-slow) var(--ease-out); }
 
+/* ── Sidebar footer + language switcher ──────────────────────────────────── */
+.sidebar-footer { padding: var(--space-3) var(--space-3) var(--space-4); display: flex; flex-direction: column; gap: var(--space-2); }
+.sidebar-user { font-size: var(--text-sm); color: rgba(255,255,255,.55); padding: 0 var(--space-1); }
+
+.lang-switcher { display: flex; align-items: center; gap: var(--space-2); }
+.lang-switcher-icon { font-size: var(--text-base); line-height: 1; opacity: .85; }
+.lang-switcher select {
+  min-height: 40px; width: auto; flex: 1;
+  padding: 8px 10px; font-size: var(--text-sm); font-weight: 600;
+  border-radius: var(--radius-sm); cursor: pointer;
+}
+/* Desktop: switcher sits in the dark sidebar footer */
+.lang-switcher-desktop select {
+  background: rgba(255,255,255,.08); color: #fff;
+  border: 1px solid rgba(255,255,255,.16);
+}
+.lang-switcher-desktop select:focus { border-color: var(--brand-300); box-shadow: 0 0 0 3px rgba(114,190,170,.25); }
+.lang-switcher-desktop .lang-switcher-icon { color: rgba(255,255,255,.7); }
+
+/* Mobile: floating pill, top-right, clear of safe areas. Hidden on desktop. */
+.lang-switcher-mobile { display: none; }
+@media (max-width: 768px) {
+  .lang-switcher-mobile {
+    display: flex; position: fixed; z-index: 150;
+    top: calc(env(safe-area-inset-top) + var(--space-2));
+    right: var(--space-3);
+    gap: var(--space-1);
+    padding: 2px 4px 2px 8px;
+    background: var(--surface); border: 1px solid var(--line);
+    border-radius: var(--radius-full); box-shadow: var(--shadow-sm);
+  }
+  .lang-switcher-mobile select {
+    min-height: 34px; padding: 4px 6px; border: none; background: transparent; color: var(--gray-700);
+  }
+  .lang-switcher-mobile select:focus { box-shadow: none; }
+  /* Give page content a little top room so the pill never covers a title */
+  .main-content { padding-top: calc(var(--space-4) + 28px); }
+}
+
+/* ── Service-toggle pill (Staff service assignment) — 44px touch target ───── */
+.service-toggle {
+  display: inline-flex; align-items: center; gap: var(--space-1);
+  min-height: 38px; padding: var(--space-2) var(--space-3);
+  border-radius: var(--radius-full); border: 1.5px solid var(--line);
+  background: var(--surface); color: var(--gray-600);
+  font-size: var(--text-xs); font-weight: 650; white-space: nowrap;
+  transition: background var(--dur-fast) var(--ease), border-color var(--dur-fast) var(--ease), color var(--dur-fast) var(--ease);
+}
+.service-toggle:hover { border-color: var(--gray-300); background: var(--gray-50); }
+.service-toggle.on { background: var(--brand-50); border-color: var(--brand-300); color: var(--brand-700); }
+@media (max-width: 768px) { .service-toggle { min-height: 44px; } }
+
+/* ── Small helpers used across polished pages ────────────────────────────── */
+.card-title { font-size: var(--text-base); font-weight: 700; color: var(--gray-900); margin-bottom: var(--space-4); }
+.divider { border-bottom: 1px solid var(--line); }
+.form-success { color: var(--success); font-size: var(--text-sm); font-weight: 650; }
+
 /* Respect reduced motion */
 @media (prefers-reduced-motion: reduce) {
   *, *::before, *::after { animation-duration: .001ms !important; animation-iteration-count: 1 !important; transition-duration: .001ms !important; }

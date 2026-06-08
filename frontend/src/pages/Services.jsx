@@ -2,6 +2,8 @@ import { useEffect, useState } from "react";
 import { getServices, createService, updateService, deleteService } from "../api/client";
 import useStore from "../store/useStore";
 import { useT } from "../i18n";
+import { SkeletonList } from "../components/Skeleton";
+import EmptyState from "../components/EmptyState";
 
 const EMPTY_FORM = {
   name_uz: "", name_ru: "", name_en: "",
@@ -18,26 +20,35 @@ export default function Services() {
   const [editing, setEditing] = useState(null);
   const [form, setForm] = useState(EMPTY_FORM);
   const [saving, setSaving] = useState(false);
+  const [saveError, setSaveError] = useState(false);
+  const [loading, setLoading] = useState(true);
 
   useEffect(() => {
     if (activeBusiness) load();
   }, [activeBusiness]);
 
   const load = async () => {
-    const data = await getServices(activeBusiness.id);
-    setServices(data);
+    setLoading(true);
+    try {
+      const data = await getServices(activeBusiness.id);
+      setServices(data);
+    } finally {
+      setLoading(false);
+    }
   };
 
-  const openNew = () => { setForm(EMPTY_FORM); setEditing(null); setShowModal(true); };
+  const openNew = () => { setForm(EMPTY_FORM); setEditing(null); setSaveError(false); setShowModal(true); };
   const openEdit = (svc) => {
     setForm({ ...svc, price: svc.price ?? "" });
     setEditing(svc.id);
+    setSaveError(false);
     setShowModal(true);
   };
 
   const handleSave = async (e) => {
     e.preventDefault();
     setSaving(true);
+    setSaveError(false);
     try {
       const payload = { ...form, price: form.price === "" ? null : parseFloat(form.price) };
       if (editing) {
@@ -48,7 +59,7 @@ export default function Services() {
       await load();
       setShowModal(false);
     } catch (err) {
-      alert("Error saving service");
+      setSaveError(true);
     } finally {
       setSaving(false);
     }
@@ -59,7 +70,7 @@ export default function Services() {
     await load();
   };
 
-  if (!activeBusiness) return <p style={{ padding: 24, color: "var(--gray-500)" }}>Select a business first.</p>;
+  if (!activeBusiness) return <EmptyState title={t("select_business_first")} />;
 
   return (
     <div>
@@ -68,30 +79,31 @@ export default function Services() {
         <button className="btn btn-primary" onClick={openNew}>+ {t("new_service")}</button>
       </div>
 
-      <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
-        {services.map((svc) => (
-          <div key={svc.id} className="card" style={{ display: "flex", alignItems: "center", gap: 12 }}>
-            <div style={{ flex: 1 }}>
-              <div style={{ fontWeight: 700 }}>{svc[`name_${lang}`] || svc.name_uz}</div>
-              <div style={{ fontSize: 13, color: "var(--gray-500)", marginTop: 2 }}>
-                ⏱ {svc.duration_minutes} {t("min")}
-                {svc.price && ` • ${parseInt(svc.price).toLocaleString()} ${t("uzs")}`}
-                {svc.requires_confirmation && " • ✋ Manual confirm"}
+      {loading ? (
+        <SkeletonList count={4} />
+      ) : services.length === 0 ? (
+        <EmptyState icon="✂️" title={t("no_services_title")} subtitle={t("no_services_desc")} />
+      ) : (
+        <div style={{ display: "flex", flexDirection: "column", gap: "var(--space-3)" }}>
+          {services.map((svc) => (
+            <div key={svc.id} className="card" style={{ display: "flex", alignItems: "center", gap: "var(--space-3)" }}>
+              <div style={{ flex: 1 }}>
+                <div style={{ fontWeight: 700 }}>{svc[`name_${lang}`] || svc.name_uz}</div>
+                <div style={{ fontSize: "var(--text-sm)", color: "var(--gray-500)", marginTop: 2 }}>
+                  ⏱ {svc.duration_minutes} {t("min")}
+                  {` • ${svc.price ? `${parseInt(svc.price).toLocaleString()} ${t("uzs")}` : t("free")}`}
+                  {svc.requires_confirmation && ` • ✋ ${t("manual_confirm")}`}
+                </div>
               </div>
+              <label className="toggle">
+                <input type="checkbox" aria-label={t("is_active")} checked={svc.is_active} onChange={() => handleToggle(svc)} />
+                <span className="toggle-slider"></span>
+              </label>
+              <button className="btn btn-secondary btn-sm" onClick={() => openEdit(svc)}>{t("edit")}</button>
             </div>
-            <label className="toggle">
-              <input type="checkbox" checked={svc.is_active} onChange={() => handleToggle(svc)} />
-              <span className="toggle-slider"></span>
-            </label>
-            <button className="btn btn-secondary btn-sm" onClick={() => openEdit(svc)}>{t("edit")}</button>
-          </div>
-        ))}
-        {services.length === 0 && (
-          <div className="card" style={{ textAlign: "center", padding: 40, color: "var(--gray-400)" }}>
-            No services yet. Add your first service.
-          </div>
-        )}
-      </div>
+          ))}
+        </div>
+      )}
 
       {showModal && (
         <div className="modal-overlay" onClick={(e) => e.target === e.currentTarget && setShowModal(false)}>
@@ -103,41 +115,44 @@ export default function Services() {
             <form onSubmit={handleSave}>
               {["uz", "ru", "en"].map((l) => (
                 <div className="form-group" key={l}>
-                  <label>Name ({l.toUpperCase()})</label>
+                  <label>{t("name")} ({t(`lang_${l}`)})</label>
                   <input required value={form[`name_${l}`]}
                     onChange={(e) => setForm({ ...form, [`name_${l}`]: e.target.value })} />
                 </div>
               ))}
-              <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12 }}>
+              <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "var(--space-3)" }}>
                 <div className="form-group">
                   <label>{t("duration")} ({t("min")})</label>
                   <input type="number" min="5" required value={form.duration_minutes}
                     onChange={(e) => setForm({ ...form, duration_minutes: parseInt(e.target.value) })} />
                 </div>
                 <div className="form-group">
-                  <label>{t("price")} (UZS)</label>
+                  <label>{t("price")} ({t("uzs")})</label>
                   <input type="number" min="0" value={form.price}
                     onChange={(e) => setForm({ ...form, price: e.target.value })} />
                 </div>
                 <div className="form-group">
-                  <label>Buffer Before ({t("min")})</label>
+                  <label>{t("buffer_before")} ({t("min")})</label>
                   <input type="number" min="0" value={form.buffer_before_minutes}
                     onChange={(e) => setForm({ ...form, buffer_before_minutes: parseInt(e.target.value) })} />
                 </div>
                 <div className="form-group">
-                  <label>Buffer After ({t("min")})</label>
+                  <label>{t("buffer_after")} ({t("min")})</label>
                   <input type="number" min="0" value={form.buffer_after_minutes}
                     onChange={(e) => setForm({ ...form, buffer_after_minutes: parseInt(e.target.value) })} />
                 </div>
               </div>
-              <div className="form-group" style={{ display: "flex", alignItems: "center", gap: 10 }}>
+              <div className="form-group" style={{ display: "flex", alignItems: "center", gap: "var(--space-3)" }}>
                 <label className="toggle">
-                  <input type="checkbox" checked={form.requires_confirmation}
+                  <input type="checkbox" aria-label={t("requires_manual_confirmation")} checked={form.requires_confirmation}
                     onChange={(e) => setForm({ ...form, requires_confirmation: e.target.checked })} />
                   <span className="toggle-slider"></span>
                 </label>
-                <span style={{ fontSize: 14 }}>Requires manual confirmation</span>
+                <span style={{ fontSize: "var(--text-sm)" }}>{t("requires_manual_confirmation")}</span>
               </div>
+              {saveError && (
+                <p style={{ color: "var(--danger)", fontSize: "var(--text-sm)" }}>{t("service_save_error")}</p>
+              )}
               <button type="submit" className="btn btn-primary btn-full" disabled={saving}>
                 {saving ? t("loading") : t("save")}
               </button>

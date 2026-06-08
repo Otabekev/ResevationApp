@@ -2,6 +2,9 @@ import { useEffect, useState } from "react";
 import { getWorkingHours, setWorkingHours, getBreaks, addBreak, deleteBreak, addBlockedTime } from "../api/client";
 import useStore from "../store/useStore";
 import { useT } from "../i18n";
+import { SkeletonList } from "../components/Skeleton";
+import EmptyState from "../components/EmptyState";
+import Toast from "../components/Toast";
 
 const DAYS = ["mon", "tue", "wed", "thu", "fri", "sat", "sun"];
 
@@ -18,26 +21,35 @@ export default function Schedule() {
   const [hours, setHours] = useState(DEFAULT_HOURS);
   const [breaks, setBreaks] = useState([]);
   const [saving, setSaving] = useState(false);
+  const [loading, setLoading] = useState(false);
   const [blockDate, setBlockDate] = useState("");
   const [blockReason, setBlockReason] = useState("");
+  const [toast, setToast] = useState(null);
 
   useEffect(() => {
     if (activeBusiness) load();
   }, [activeBusiness]);
 
   const load = async () => {
-    const [wh, brk] = await Promise.all([
-      getWorkingHours(activeBusiness.id),
-      getBreaks(activeBusiness.id),
-    ]);
-    if (wh.length > 0) {
-      const filled = DEFAULT_HOURS.map((def) => {
-        const existing = wh.find((w) => w.day_of_week === def.day_of_week);
-        return existing || def;
-      });
-      setHours(filled);
+    setLoading(true);
+    try {
+      const [wh, brk] = await Promise.all([
+        getWorkingHours(activeBusiness.id),
+        getBreaks(activeBusiness.id),
+      ]);
+      if (wh.length > 0) {
+        const filled = DEFAULT_HOURS.map((def) => {
+          const existing = wh.find((w) => w.day_of_week === def.day_of_week);
+          return existing || def;
+        });
+        setHours(filled);
+      }
+      setBreaks(brk);
+    } catch {
+      setToast({ message: t("error"), variant: "error" });
+    } finally {
+      setLoading(false);
     }
-    setBreaks(brk);
   };
 
   const updateDay = (idx, field, value) => {
@@ -48,9 +60,9 @@ export default function Schedule() {
     setSaving(true);
     try {
       await setWorkingHours(activeBusiness.id, hours);
-      alert("Saved!");
+      setToast({ message: t("saved"), variant: "success" });
     } catch {
-      alert("Error saving");
+      setToast({ message: t("error"), variant: "error" });
     } finally {
       setSaving(false);
     }
@@ -58,13 +70,17 @@ export default function Schedule() {
 
   const handleAddBlock = async (e) => {
     e.preventDefault();
-    await addBlockedTime(activeBusiness.id, { blocked_date: blockDate, full_day: true, reason: blockReason });
-    setBlockDate("");
-    setBlockReason("");
-    alert("Day blocked!");
+    try {
+      await addBlockedTime(activeBusiness.id, { blocked_date: blockDate, full_day: true, reason: blockReason });
+      setBlockDate("");
+      setBlockReason("");
+      setToast({ message: t("block_time"), variant: "success" });
+    } catch {
+      setToast({ message: t("error"), variant: "error" });
+    }
   };
 
-  if (!activeBusiness) return <p style={{ padding: 24, color: "var(--gray-500)" }}>Select a business first.</p>;
+  if (!activeBusiness) return <EmptyState title={t("select_business_first")} />;
 
   return (
     <div>
@@ -75,48 +91,56 @@ export default function Schedule() {
         </button>
       </div>
 
-      {/* Working hours */}
-      <div className="card" style={{ marginBottom: 16 }}>
-        <h3 style={{ fontWeight: 700, marginBottom: 14 }}>{t("working_hours")}</h3>
-        <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
-          {hours.map((h, idx) => (
-            <div key={idx} style={{ display: "flex", alignItems: "center", gap: 10 }}>
-              <span style={{ width: 36, fontWeight: 600, fontSize: 14 }}>{t(DAYS[idx])}</span>
-              <label className="toggle">
-                <input
-                  type="checkbox"
-                  checked={!h.is_day_off}
-                  onChange={(e) => updateDay(idx, "is_day_off", !e.target.checked)}
-                />
-                <span className="toggle-slider"></span>
-              </label>
-              {!h.is_day_off ? (
-                <>
-                  <input type="time" value={h.start_time} onChange={(e) => updateDay(idx, "start_time", e.target.value)}
-                    style={{ width: 110 }} />
-                  <span style={{ color: "var(--gray-400)" }}>—</span>
-                  <input type="time" value={h.end_time} onChange={(e) => updateDay(idx, "end_time", e.target.value)}
-                    style={{ width: 110 }} />
-                </>
-              ) : (
-                <span style={{ fontSize: 13, color: "var(--gray-400)" }}>{t("day_off")}</span>
-              )}
+      {loading ? <SkeletonList count={3} /> : (
+        <>
+          {/* Working hours */}
+          <div className="card" style={{ marginBottom: "var(--space-4)" }}>
+            <h3 className="card-title" style={{ marginBottom: "var(--space-4)" }}>{t("working_hours")}</h3>
+            <div style={{ display: "flex", flexDirection: "column", gap: "var(--space-3)" }}>
+              {hours.map((h, idx) => (
+                <div key={idx} style={{ display: "flex", alignItems: "center", gap: "var(--space-3)" }}>
+                  <span style={{ width: 36, fontWeight: 600, fontSize: "var(--text-sm)" }}>{t(DAYS[idx])}</span>
+                  <label className="toggle">
+                    <input
+                      type="checkbox"
+                      checked={!h.is_day_off}
+                      onChange={(e) => updateDay(idx, "is_day_off", !e.target.checked)}
+                      disabled={saving}
+                      aria-label={`${t(DAYS[idx])} ${t("day_off")}`}
+                    />
+                    <span className="toggle-slider"></span>
+                  </label>
+                  {!h.is_day_off ? (
+                    <>
+                      <input type="time" value={h.start_time} onChange={(e) => updateDay(idx, "start_time", e.target.value)}
+                        disabled={saving} style={{ width: 110 }} />
+                      <span style={{ color: "var(--gray-400)" }}>—</span>
+                      <input type="time" value={h.end_time} onChange={(e) => updateDay(idx, "end_time", e.target.value)}
+                        disabled={saving} style={{ width: 110 }} />
+                    </>
+                  ) : (
+                    <span style={{ fontSize: "var(--text-sm)", color: "var(--gray-400)" }}>{t("day_off")}</span>
+                  )}
+                </div>
+              ))}
             </div>
-          ))}
-        </div>
-      </div>
+          </div>
 
-      {/* Block a day */}
-      <div className="card">
-        <h3 style={{ fontWeight: 700, marginBottom: 14 }}>{t("block_time")}</h3>
-        <form onSubmit={handleAddBlock} style={{ display: "flex", gap: 10, flexWrap: "wrap" }}>
-          <input type="date" value={blockDate} onChange={(e) => setBlockDate(e.target.value)}
-            required style={{ flex: 1, minWidth: 150 }} />
-          <input placeholder="Reason (optional)" value={blockReason}
-            onChange={(e) => setBlockReason(e.target.value)} style={{ flex: 2, minWidth: 150 }} />
-          <button type="submit" className="btn btn-danger">{t("block_time")}</button>
-        </form>
-      </div>
+          {/* Block a day */}
+          <div className="card">
+            <h3 className="card-title" style={{ marginBottom: "var(--space-4)" }}>{t("block_time")}</h3>
+            <form onSubmit={handleAddBlock} style={{ display: "flex", gap: "var(--space-3)", flexWrap: "wrap" }}>
+              <input type="date" value={blockDate} onChange={(e) => setBlockDate(e.target.value)}
+                required style={{ flex: 1, minWidth: 150 }} />
+              <input placeholder={t("reason_optional")} value={blockReason}
+                onChange={(e) => setBlockReason(e.target.value)} style={{ flex: 2, minWidth: 150 }} />
+              <button type="submit" className="btn btn-danger">{t("block_time")}</button>
+            </form>
+          </div>
+        </>
+      )}
+
+      <Toast toast={toast} onClose={() => setToast(null)} />
     </div>
   );
 }
