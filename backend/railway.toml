@@ -8,7 +8,10 @@ dockerfilePath = "Dockerfile"
 # in a separate container before the new release is promoted; if it fails,
 # the new release is rejected and the previous one keeps serving.
 preDeployCommand = "alembic upgrade head"
-startCommand = "uvicorn app.main:app --host 0.0.0.0 --port $PORT"
+# Wrap in `sh -c` so $PORT is expanded by the shell at start time.
+# Without the shell, Railway passes the literal string "$PORT" to uvicorn
+# and Click rejects it with: Invalid value for '--port': '$PORT' is not a valid integer.
+startCommand = "sh -c 'uvicorn app.main:app --host 0.0.0.0 --port ${PORT:-8080}'"
 healthcheckPath = "/health"
 # Generous window: uvicorn lifespan + first DB connect on cold Neon can be slow.
 healthcheckTimeout = 120
