@@ -1,7 +1,13 @@
 import axios from "axios";
 
+// In production the frontend lives on Vercel and `/api/*` is rewritten to the
+// Railway backend (see vercel.json) — same-origin from the browser, no CORS.
+// For local dev or preview environments, set VITE_API_BASE_URL to point at a
+// remote backend directly (e.g. https://<railway>/api/v1).
+const baseURL = import.meta.env.VITE_API_BASE_URL || "/api/v1";
+
 const api = axios.create({
-  baseURL: "/api/v1",
+  baseURL,
   timeout: 15000,
 });
 

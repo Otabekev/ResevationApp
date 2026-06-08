@@ -96,12 +96,21 @@ python -m scripts.seed_categories
 
 ## Step 7: Frontend — Vercel
 
-1. Go to [vercel.com](https://vercel.com) → New Project → Import from GitHub
-2. Root Directory: `frontend`
-3. Framework: Vite
-4. Update `frontend/vercel.json` — replace `your-backend.railway.app` with your real Railway URL
-5. Add environment variable: `VITE_DEV_BYPASS_TELEGRAM=false`
-6. Deploy
+1. Go to [vercel.com](https://vercel.com) → New Project → Import from GitHub (`Otabekev/ResevationApp`)
+2. **Root Directory:** `frontend`
+3. **Framework Preset:** Vite (auto-detected). Build Command `npm run build`, Output `dist`.
+4. The backend URL is already wired in `frontend/vercel.json`:
+   `https://resevationapp-backend-production.up.railway.app` — `/api/*` is proxied to it,
+   so the browser stays same-origin and **no CORS is needed**.
+5. Environment Variables (Project Settings → Environment Variables):
+   - `VITE_DEV_BYPASS_TELEGRAM=false` (production)
+   - Leave `VITE_API_BASE_URL` UNSET — the rewrite handles routing.
+6. Deploy. Copy the production URL (e.g. `https://rezerv.vercel.app`).
+7. Back on Railway → backend service → Variables → set
+   `ALLOWED_ORIGINS=https://<your>.vercel.app` (defense-in-depth + satisfies
+   `validate_runtime_config`). Redeploy backend.
+8. Smoke test: open `https://<your>.vercel.app/health` — should return
+   `{"status":"ok","db":true,"platform":"Rezerv"}` (proves the rewrite works).
 
 ---
 
