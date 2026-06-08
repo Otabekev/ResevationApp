@@ -11,5 +11,8 @@ RUN pip install --no-cache-dir -r requirements.txt
 
 COPY . .
 
-# Run migrations then start server
-CMD ["sh", "-c", "alembic upgrade head && uvicorn app.main:app --host 0.0.0.0 --port ${PORT:-8000}"]
+# Migrations are NOT run here. On Railway they run in `preDeployCommand`
+# (see railway.toml) so the healthcheck window doesn't race the migration.
+# For other platforms (docker-compose, Hetzner), run `alembic upgrade head`
+# explicitly before bringing the service up — see RUNBOOK.md.
+CMD ["sh", "-c", "uvicorn app.main:app --host 0.0.0.0 --port ${PORT:-8000}"]

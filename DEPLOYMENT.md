@@ -72,7 +72,7 @@ ENVIRONMENT=production
 2. Select your repo, set **Root Directory** to `backend`
 3. Railway auto-detects the `Dockerfile` and `railway.toml`
 4. Add all environment variables from Step 4 in Railway's Variables tab
-5. Deploy — Railway runs `alembic upgrade head` then starts uvicorn
+5. Deploy — Railway runs `alembic upgrade head` as a **pre-deploy step**, then starts uvicorn. Healthcheck on `/health` (120s timeout)
 6. Copy the generated URL (e.g. `https://rezerv-backend.railway.app`)
 7. Set it as `WEBHOOK_BASE_URL` in Railway variables
 

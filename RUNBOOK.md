@@ -8,9 +8,15 @@ Short, practical procedures for running Rezerv in production. Stack: Neon
 ## 1. Deploy
 
 **Backend / Bot (Railway)** — push to `main`; Railway rebuilds from each service's
-Dockerfile. The backend container runs `alembic upgrade head` then starts uvicorn
-(see `backend/Dockerfile` / `backend/railway.toml`), so migrations apply on every
-deploy. Health is checked at `/health` (verifies DB connectivity).
+Dockerfile. Migrations run as a Railway **pre-deploy step** (`preDeployCommand =
+"alembic upgrade head"` in `backend/railway.toml`) — in a separate container, before
+the new release is promoted. If migrations fail, the new release is rejected and the
+previous one keeps serving. The runtime container only runs uvicorn, so the
+healthcheck window (`healthcheckPath = /health`, `healthcheckTimeout = 120`) starts
+the moment uvicorn binds the port, never during a migration. `/health` verifies DB
+connectivity. For non-Railway deploys (docker-compose, Hetzner), run
+`alembic upgrade head` explicitly before bringing the backend up — see the
+comment in `docker-compose.yml`.
 
 **Frontend (Vercel)** — push to `main`; Vercel runs `npm ci && npm run build`.
 Before the first deploy, set the API rewrite target in `frontend/vercel.json`

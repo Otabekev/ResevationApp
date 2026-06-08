@@ -40,7 +40,11 @@ services:
         condition: service_healthy
     ports:
       - "8000:8000"
-    # No command override: the Dockerfile CMD runs `alembic upgrade head` then uvicorn.
+    # Migrations are NOT in the Dockerfile CMD (Railway runs them as a pre-deploy
+    # step — see backend/railway.toml). For VPS / docker-compose deploys, run
+    # `docker-compose run --rm backend alembic upgrade head` before `up -d`,
+    # or chain it here if you want one-shot bring-up:
+    #   command: sh -c "alembic upgrade head && uvicorn app.main:app --host 0.0.0.0 --port 8000"
     # Hot-reload + source bind-mount live in docker-compose.dev.yml.
 
   bot:

@@ -3,9 +3,15 @@ builder = "DOCKERFILE"
 dockerfilePath = "Dockerfile"
 
 [deploy]
-startCommand = "sh -c 'alembic upgrade head && uvicorn app.main:app --host 0.0.0.0 --port ${PORT:-8000}'"
+# Run migrations OUT of the startup path so the healthcheck window starts
+# only after Postgres is on the new schema. Railway runs preDeployCommand
+# in a separate container before the new release is promoted; if it fails,
+# the new release is rejected and the previous one keeps serving.
+preDeployCommand = "alembic upgrade head"
+startCommand = "uvicorn app.main:app --host 0.0.0.0 --port $PORT"
 healthcheckPath = "/health"
-healthcheckTimeout = 30
+# Generous window: uvicorn lifespan + first DB connect on cold Neon can be slow.
+healthcheckTimeout = 120
 restartPolicyType = "ON_FAILURE"
 restartPolicyMaxRetries = 3
 
