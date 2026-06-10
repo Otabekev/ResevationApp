@@ -6,6 +6,7 @@ from pydantic import BaseModel
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app import web_login_store
 from app.config import settings
 from app.database import get_db
 from app.deps import decode_token, get_current_user
@@ -152,6 +153,62 @@ async def auth_bot(request: Request, body: BotAuthRequest, db: AsyncSession = De
         name=user.name,
         language=user.language,
     )
+
+
+# ── Web dashboard login via the bot (deep-link + poll) ───────────────────────
+# Flow: browser generates a nonce → opens t.me/<bot>?start=login_<nonce> → user
+# confirms in the bot → bot calls /tg-login/complete (bot_secret) → tokens are
+# parked in Redis keyed by the nonce → the browser's poll picks them up once.
+# This avoids Telegram's flaky Login-Widget confirmation entirely.
+
+class WebLoginCompleteRequest(BaseModel):
+    nonce: str
+    telegram_id: int
+    name: str
+    username: str | None = None
+    language: str = "uz"
+    bot_secret: str  # shared secret between bot and backend
+
+
+@router.post("/tg-login/complete")
+@limiter.limit("60/minute")
+async def complete_web_login(
+    request: Request, body: WebLoginCompleteRequest, db: AsyncSession = Depends(get_db)
+):
+    """Called by the bot once a user confirms a web login. Mints tokens and parks
+    them in Redis keyed by the browser's nonce. Protected by BOT_SECRET, fail-closed."""
+    if not settings.bot_secret or not hmac.compare_digest(body.bot_secret, settings.bot_secret):
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Invalid bot secret")
+
+    nonce = body.nonce.strip()
+    if not nonce or len(nonce) > 64 or not all(c.isalnum() or c in "-_" for c in nonce):
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Invalid nonce")
+
+    lang = body.language if body.language in ("uz", "ru", "en") else "uz"
+    user = await get_or_create_user_from_telegram(db, body.telegram_id, body.name, body.username, lang)
+    await db.commit()
+
+    payload = TokenResponse(
+        access_token=create_access_token(user.id),
+        refresh_token=create_refresh_token(user.id),
+        user_id=user.id,
+        role=user.role,
+        name=user.name,
+        language=user.language,
+    ).model_dump()
+    await web_login_store.save(nonce, payload)
+    return {"ok": True}
+
+
+@router.get("/tg-login/poll/{nonce}")
+@limiter.limit("120/minute")
+async def poll_web_login(request: Request, nonce: str):
+    """Polled by the browser. Returns the minted tokens once the bot completes
+    the login (one-time read), otherwise {status: pending}."""
+    data = await web_login_store.take(nonce)
+    if not data:
+        return {"status": "pending"}
+    return {"status": "ok", **data}
 
 
 class RefreshRequest(BaseModel):

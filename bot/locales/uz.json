@@ -37,5 +37,9 @@
   "date_tomorrow": "Ertaga",
   "join_success": "✅ Siz muvaffaqiyatli qo'shildingiz! Biznes: {business}",
   "join_invalid": "❌ Taklif havola topilmadi yoki eskirgan.",
-  "main_menu": "Asosiy menyu"
+  "main_menu": "Asosiy menyu",
+  "web_login_confirm": "🔐 Veb-paneliga kirishni tasdiqlaysizmi? Agar bu siz bo'lmasangiz, ushbu xabarni e'tiborsiz qoldiring.",
+  "web_login_yes": "✅ Ha, bu men",
+  "web_login_done": "✅ Tayyor! Brauzeringizga qayting — siz tizimga kirdingiz.",
+  "web_login_failed": "❌ Kirishda xatolik. Iltimos, brauzerda qaytadan urinib ko'ring."
 }

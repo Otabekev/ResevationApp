@@ -76,6 +76,17 @@ async def cmd_start(message: Message, state: FSMContext) -> None:
             ])
         )
         return
+    if start_param.startswith("login_"):
+        # login_{nonce} — web dashboard login. Ask the user to confirm so a
+        # drive-by /start can't silently authenticate someone else's browser.
+        nonce = start_param[6:]
+        await message.answer(
+            t("web_login_confirm", lang),
+            reply_markup=InlineKeyboardMarkup(inline_keyboard=[
+                [InlineKeyboardButton(text=t("web_login_yes", lang), callback_data=f"weblogin_{nonce}")]
+            ])
+        )
+        return
 
     await message.answer(
         t("start", lang),
@@ -102,6 +113,21 @@ async def _handle_join(message: Message, state: FSMContext, token: str) -> None:
         )
     except Exception:
         await message.answer(t("join_invalid", lang))
+
+
+@router.callback_query(F.data.startswith("weblogin_"))
+async def confirm_web_login(callback: CallbackQuery, state: FSMContext) -> None:
+    """User tapped 'Yes, it's me' — tell the backend to release the web token."""
+    data = await state.get_data()
+    lang = data.get("lang", "uz")
+    nonce = callback.data[len("weblogin_"):]
+    u = callback.from_user
+    try:
+        await api_client.complete_web_login(nonce, u.id, u.full_name, u.username, lang)
+        await callback.message.edit_text(t("web_login_done", lang))
+    except Exception:
+        await callback.message.edit_text(t("web_login_failed", lang))
+    await callback.answer()
 
 
 @router.callback_query(F.data == "settings")

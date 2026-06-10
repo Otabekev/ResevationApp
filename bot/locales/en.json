@@ -37,5 +37,9 @@
   "date_tomorrow": "Tomorrow",
   "join_success": "✅ You have joined successfully! Business: {business}",
   "join_invalid": "❌ Invite link not found or expired.",
-  "main_menu": "Main menu"
+  "main_menu": "Main menu",
+  "web_login_confirm": "🔐 Confirm login to the web dashboard? If this wasn't you, ignore this message.",
+  "web_login_yes": "✅ Yes, it's me",
+  "web_login_done": "✅ Done! Return to your browser — you're logged in.",
+  "web_login_failed": "❌ Login failed. Please try again from the browser."
 }

@@ -170,6 +170,64 @@ def test_widget_rejected_when_token_unset(monkeypatch):
     assert verify_telegram_login_widget(payload) is None
 
 
+# ── B10: web dashboard login via bot (deep-link + poll) ──────────────────────
+
+async def test_web_login_complete_and_poll(client, monkeypatch):
+    """Full handshake: poll is pending → bot completes → poll returns token ONCE."""
+    from app import web_login_store
+
+    store: dict[str, dict] = {}
+
+    async def fake_save(nonce, payload):
+        store[nonce] = payload
+
+    async def fake_take(nonce):
+        return store.pop(nonce, None)
+
+    monkeypatch.setattr(web_login_store, "save", fake_save)
+    monkeypatch.setattr(web_login_store, "take", fake_take)
+
+    nonce = "abc123-nonce_XYZ"
+
+    # Before the bot completes → pending
+    r1 = await client.get(f"{API}/auth/tg-login/poll/{nonce}")
+    assert r1.json()["status"] == "pending"
+
+    # Bot confirms the login
+    r2 = await client.post(f"{API}/auth/tg-login/complete", json={
+        "nonce": nonce, "telegram_id": 777222777, "name": "Web Owner",
+        "username": "owner", "language": "uz", "bot_secret": settings.bot_secret,
+    })
+    assert r2.status_code == 200, r2.text
+
+    # Browser poll picks up the token
+    r3 = await client.get(f"{API}/auth/tg-login/poll/{nonce}")
+    body = r3.json()
+    assert body["status"] == "ok"
+    assert "access_token" in body and body["user_id"] > 0
+
+    # One-time read: a second poll is pending again (token already consumed)
+    r4 = await client.get(f"{API}/auth/tg-login/poll/{nonce}")
+    assert r4.json()["status"] == "pending"
+
+
+async def test_web_login_complete_rejects_bad_secret(client, monkeypatch):
+    """A wrong bot_secret must 403 and never touch the token store."""
+    from app import web_login_store
+
+    touched = {}
+
+    async def fake_save(nonce, payload):
+        touched["yes"] = True
+
+    monkeypatch.setattr(web_login_store, "save", fake_save)
+    resp = await client.post(f"{API}/auth/tg-login/complete", json={
+        "nonce": "n1", "telegram_id": 1, "name": "X", "bot_secret": "wrong-secret",
+    })
+    assert resp.status_code == 403, resp.text
+    assert "yes" not in touched
+
+
 # ── B7: password hashing must actually work (passlib/bcrypt compat) ───────────
 
 def test_password_hashing_roundtrip():

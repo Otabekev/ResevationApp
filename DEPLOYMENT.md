@@ -112,13 +112,18 @@ python -m scripts.seed_categories
    `validate_runtime_config`). Redeploy backend.
 8. Smoke test: open `https://<your>.vercel.app/api/v1/health` — should return
    `{"status":"ok","db":true,"platform":"Rezerv"}` (proves the rewrite works).
-9. **BotFather one-time setup** for the Login Widget:
-   - Telegram → [@BotFather](https://t.me/BotFather) → `/setdomain` → choose
-     `@QulayNavbat_bot` → enter the Vercel production domain (e.g. `rezerv.vercel.app`)
-     **without `https://`**.
-   - Constraint: BotFather only allows ONE domain per bot. Preview deploys
-     cannot use the Login Widget unless you create a separate staging bot.
-     Acceptable for the early validation phase.
+9. **Owner login = bot deep-link (no BotFather domain setup needed).**
+   The dashboard logs owners in via the bot: the login page opens
+   `t.me/<bot>?start=login_<nonce>`, the user taps **START → confirm**, and the
+   browser polls `/auth/tg-login/poll/<nonce>` until the bot releases the token.
+   Requirements:
+   - The **bot service must be running** on Railway (it handles the `login_`
+     deep-link and calls `/auth/tg-login/complete`).
+   - Backend + bot must share the same `BOT_SECRET` and `REDIS_URL`.
+   - Frontend env `VITE_TELEGRAM_BOT_USERNAME=QulayNavbat_bot` (the @-handle,
+     no `@`) so the deep-link points at the right bot.
+   - No `/setdomain`, no Telegram Login Widget, works identically on every
+     device and on preview deploys.
 
 ---
 

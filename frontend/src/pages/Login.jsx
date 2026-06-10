@@ -1,11 +1,21 @@
 import { useEffect, useRef, useState } from "react";
 import { useNavigate } from "react-router-dom";
-import { authTelegramWidget, getMe } from "../api/client";
+import { pollWebLogin, getMe } from "../api/client";
 import useStore from "../store/useStore";
 import { useT } from "../i18n";
 
 const IS_DEV = import.meta.env.DEV || import.meta.env.VITE_DEV_BYPASS_TELEGRAM === "true";
 const BOT_USERNAME = import.meta.env.VITE_TELEGRAM_BOT_USERNAME || "QulayNavbat_bot";
+
+const POLL_INTERVAL_MS = 2000;
+const POLL_TIMEOUT_MS = 180000; // 3 minutes
+
+// High-entropy, URL-safe nonce (hex). Used in the bot deep-link + poll handshake.
+function makeNonce() {
+  const a = new Uint8Array(16);
+  (window.crypto || window.msCrypto).getRandomValues(a);
+  return Array.from(a, (b) => b.toString(16).padStart(2, "0")).join("");
+}
 
 function BrandMark() {
   return (
@@ -48,49 +58,54 @@ function ValueBullet({ icon, text }) {
 export default function Login() {
   const [token, setToken] = useState("");
   const [error, setError] = useState("");
-  const [widgetLoading, setWidgetLoading] = useState(false);
+  const [waiting, setWaiting] = useState(false);
   const { setAuth, lang } = useStore();
   const t = useT(lang);
   const navigate = useNavigate();
-  const widgetContainerRef = useRef(null);
 
-  // ── Telegram Login Widget integration ─────────────────────────────────────
-  useEffect(() => {
-    // Callback Telegram invokes via data-onauth attribute.
-    window.onTelegramAuth = async (tgUser) => {
-      setError("");
-      setWidgetLoading(true);
-      try {
-        const data = await authTelegramWidget(tgUser);
-        setAuth(
-          { id: data.user_id, name: data.name, role: data.role, language: data.language },
-          data.access_token,
-        );
-        navigate("/");
-      } catch {
-        setError(t("invalid_token"));
-        setWidgetLoading(false);
+  // One nonce per page load; the deep-link and the poll share it.
+  const [nonce] = useState(makeNonce);
+  const tgUrl = `https://t.me/${BOT_USERNAME}?start=login_${nonce}`;
+  const pollRef = useRef(null);
+  const startedRef = useRef(0);
+
+  const stopPolling = () => {
+    if (pollRef.current) {
+      clearInterval(pollRef.current);
+      pollRef.current = null;
+    }
+  };
+
+  // Clean up the interval if the user navigates away mid-login.
+  useEffect(() => stopPolling, []);
+
+  const beginLogin = () => {
+    setError("");
+    setWaiting(true);
+    startedRef.current = Date.now();
+    if (pollRef.current) return; // already polling — reuse it
+    pollRef.current = setInterval(async () => {
+      if (Date.now() - startedRef.current > POLL_TIMEOUT_MS) {
+        stopPolling();
+        setWaiting(false);
+        setError(t("login_timeout"));
+        return;
       }
-    };
-
-    // Inject the widget script (must be appended via DOM API — Telegram parses
-    // its data-* attributes at script-load time, not lazily).
-    const script = document.createElement("script");
-    script.src = "https://telegram.org/js/telegram-widget.js?22";
-    script.async = true;
-    script.setAttribute("data-telegram-login", BOT_USERNAME);
-    script.setAttribute("data-size", "large");
-    script.setAttribute("data-radius", "10");
-    script.setAttribute("data-onauth", "onTelegramAuth(user)");
-    script.setAttribute("data-request-access", "write");
-    const container = widgetContainerRef.current;
-    if (container) container.appendChild(script);
-
-    return () => {
-      if (container && script.parentNode === container) container.removeChild(script);
-      delete window.onTelegramAuth;
-    };
-  }, []); // eslint-disable-line react-hooks/exhaustive-deps
+      try {
+        const res = await pollWebLogin(nonce);
+        if (res.status === "ok") {
+          stopPolling();
+          setAuth(
+            { id: res.user_id, name: res.name, role: res.role, language: res.language },
+            res.access_token,
+          );
+          navigate("/");
+        }
+      } catch {
+        /* keep polling — transient network errors are expected */
+      }
+    }, POLL_INTERVAL_MS);
+  };
 
   // Dev-mode fallback: paste a JWT directly. Hidden in production builds.
   const handleDevSubmit = async (e) => {
@@ -131,20 +146,36 @@ export default function Login() {
           <ValueBullet icon="📊" text={t("landing_bullet_3")} />
         </div>
 
-        {/* Telegram Login Widget mounts here */}
-        <div
-          ref={widgetContainerRef}
-          style={{ display: "flex", justifyContent: "center", minHeight: 48, marginBottom: "var(--space-3)" }}
-        />
-        <p style={{ color: "var(--gray-500)", fontSize: "var(--text-xs)", textAlign: "center", lineHeight: 1.5 }}>
-          {t("login_with_telegram_hint")}
-        </p>
+        {/* Bot deep-link login: opens Telegram, then we poll until confirmed. */}
+        <a
+          href={tgUrl}
+          target="_blank"
+          rel="noopener noreferrer"
+          className="btn btn-primary btn-full"
+          onClick={beginLogin}
+          style={{ gap: "var(--space-2)" }}
+        >
+          <span aria-hidden>✈️</span> {t("login_with_telegram")}
+        </a>
 
-        {widgetLoading && (
-          <p className="muted" style={{ textAlign: "center", fontSize: "var(--text-sm)", marginTop: "var(--space-3)" }}>
-            {t("loading")}
+        {waiting ? (
+          <div style={{ marginTop: "var(--space-3)", textAlign: "center" }}>
+            <p className="muted" style={{ fontSize: "var(--text-sm)" }}>{t("login_waiting")}</p>
+            <a
+              href={tgUrl}
+              target="_blank"
+              rel="noopener noreferrer"
+              style={{ fontSize: "var(--text-xs)", fontWeight: 600 }}
+            >
+              {t("login_open_telegram")}
+            </a>
+          </div>
+        ) : (
+          <p style={{ color: "var(--gray-500)", fontSize: "var(--text-xs)", textAlign: "center", lineHeight: 1.5, marginTop: "var(--space-3)" }}>
+            {t("login_with_telegram_hint")}
           </p>
         )}
+
         {error && (
           <p style={{ color: "var(--danger)", fontSize: "var(--text-sm)", textAlign: "center", marginTop: "var(--space-3)" }}>
             {error}

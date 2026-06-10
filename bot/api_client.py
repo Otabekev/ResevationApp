@@ -21,6 +21,28 @@ async def auth_user(telegram_id: int, name: str, username: str | None, language:
         return resp.json()
 
 
+async def complete_web_login(
+    nonce: str, telegram_id: int, name: str, username: str | None, language: str
+) -> dict:
+    """Confirm a web-dashboard login: the backend mints tokens and parks them in
+    Redis keyed by the browser's nonce. Protected by BOT_SECRET."""
+    async with httpx.AsyncClient() as client:
+        resp = await client.post(
+            f"{BACKEND_URL}/auth/tg-login/complete",
+            json={
+                "nonce": nonce,
+                "telegram_id": telegram_id,
+                "name": name,
+                "username": username,
+                "language": language,
+                "bot_secret": BOT_SECRET,
+            },
+            timeout=10,
+        )
+        resp.raise_for_status()
+        return resp.json()
+
+
 async def get_categories() -> list[dict]:
     async with httpx.AsyncClient() as client:
         resp = await client.get(f"{BACKEND_URL}/businesses/categories", timeout=10)

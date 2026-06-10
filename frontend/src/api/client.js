@@ -44,6 +44,11 @@ export const authTelegram = (initData) =>
 export const authTelegramWidget = (payload) =>
   api.post("/auth/telegram-widget", payload).then((r) => r.data);
 
+// Bot deep-link login: the browser polls this with its nonce until the user
+// confirms in the bot, at which point it returns the minted tokens (one-time).
+export const pollWebLogin = (nonce) =>
+  api.get(`/auth/tg-login/poll/${nonce}`).then((r) => r.data);
+
 export const getMe = () => api.get("/auth/me").then((r) => r.data);
 
 // ── Businesses ────────────────────────────────────────────────────────────────
