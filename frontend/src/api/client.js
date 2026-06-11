@@ -18,13 +18,49 @@ api.interceptors.request.use((config) => {
   return config;
 });
 
-// On 401, clear token and redirect to login
+// ── 401 handling with silent refresh ─────────────────────────────────────────
+// On the first 401, try to rotate tokens with the stored refresh token; queue
+// any requests that 401 while the refresh is in flight, then replay them.
+// Only if refresh itself fails do we clear the session and go to /login.
+let refreshing = null;
+
+function hardLogout() {
+  localStorage.removeItem("access_token");
+  localStorage.removeItem("refresh_token");
+  localStorage.removeItem("active_business");
+  if (!window.location.pathname.startsWith("/login")) {
+    window.location.href = "/login";
+  }
+}
+
+async function refreshTokens() {
+  const refresh_token = localStorage.getItem("refresh_token");
+  if (!refresh_token) throw new Error("no refresh token");
+  // Plain axios (not `api`) so this never loops through the interceptor.
+  const { data } = await axios.post(`${baseURL}/auth/refresh`, { refresh_token }, { timeout: 15000 });
+  localStorage.setItem("access_token", data.access_token);
+  localStorage.setItem("refresh_token", data.refresh_token);
+  return data.access_token;
+}
+
 api.interceptors.response.use(
   (res) => res,
-  (err) => {
-    if (err.response?.status === 401) {
-      localStorage.removeItem("access_token");
-      window.location.href = "/login";
+  async (err) => {
+    const original = err.config;
+    const status = err.response?.status;
+
+    if (status === 401 && original && !original._retried) {
+      original._retried = true;
+      try {
+        refreshing = refreshing || refreshTokens();
+        const newToken = await refreshing;
+        refreshing = null;
+        original.headers.Authorization = `Bearer ${newToken}`;
+        return api(original);
+      } catch {
+        refreshing = null;
+        hardLogout();
+      }
     }
     return Promise.reject(err);
   }
@@ -33,14 +69,9 @@ api.interceptors.response.use(
 export default api;
 
 // ── Auth ──────────────────────────────────────────────────────────────────────
-// `authTelegram` is the Mini App initData flow — no longer used by the web
-// dashboard (we use the Login Widget now), kept for any future Mini App surface
-// and so the existing /auth/telegram backend tests stay meaningful.
 export const authTelegram = (initData) =>
   api.post("/auth/telegram", { init_data: initData }).then((r) => r.data);
 
-// Standalone Telegram Login Widget callback — what the web dashboard uses.
-// `payload` is the user object Telegram passes to `data-onauth`.
 export const authTelegramWidget = (payload) =>
   api.post("/auth/telegram-widget", payload).then((r) => r.data);
 
@@ -50,6 +81,8 @@ export const pollWebLogin = (nonce) =>
   api.get(`/auth/tg-login/poll/${nonce}`).then((r) => r.data);
 
 export const getMe = () => api.get("/auth/me").then((r) => r.data);
+export const updateMyLanguage = (language) =>
+  api.patch("/auth/me/language", { language }).then((r) => r.data);
 
 // ── Businesses ────────────────────────────────────────────────────────────────
 export const getCategories = () => api.get("/businesses/categories").then((r) => r.data);
@@ -82,15 +115,31 @@ export const getWorkingHours = (bizId) =>
   api.get(`/businesses/${bizId}/working-hours`).then((r) => r.data);
 export const setWorkingHours = (bizId, hours) =>
   api.put(`/businesses/${bizId}/working-hours`, { hours }).then((r) => r.data);
+export const getStaffWorkingHours = (bizId, staffId) =>
+  api.get(`/businesses/${bizId}/staff/${staffId}/working-hours`).then((r) => r.data);
+export const setStaffWorkingHours = (bizId, staffId, hours) =>
+  api.put(`/businesses/${bizId}/staff/${staffId}/working-hours`, { hours }).then((r) => r.data);
+export const clearStaffWorkingHours = (bizId, staffId) =>
+  api.delete(`/businesses/${bizId}/staff/${staffId}/working-hours`);
 export const getBreaks = (bizId) => api.get(`/businesses/${bizId}/breaks`).then((r) => r.data);
 export const addBreak = (bizId, data) =>
   api.post(`/businesses/${bizId}/breaks`, data).then((r) => r.data);
 export const deleteBreak = (bizId, breakId) =>
   api.delete(`/businesses/${bizId}/breaks/${breakId}`);
+export const getBlockedTimes = (bizId) =>
+  api.get(`/businesses/${bizId}/blocked-times`).then((r) => r.data);
 export const addBlockedTime = (bizId, data) =>
   api.post(`/businesses/${bizId}/blocked-times`, data).then((r) => r.data);
 export const deleteBlockedTime = (bizId, btId) =>
   api.delete(`/businesses/${bizId}/blocked-times/${btId}`);
+
+// ── Availability ──────────────────────────────────────────────────────────────
+export const getAvailability = (bizId, serviceId, date, staffId) =>
+  api
+    .get("/availability", {
+      params: { business_id: bizId, service_id: serviceId, date, staff_id: staffId || undefined },
+    })
+    .then((r) => r.data);
 
 // ── Bookings ──────────────────────────────────────────────────────────────────
 export const getBookings = (bizId, params) =>

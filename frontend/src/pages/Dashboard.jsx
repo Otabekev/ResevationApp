@@ -1,9 +1,15 @@
 import { useEffect, useState } from "react";
-import { getMyBusinesses, getBookings, getAnalytics, getServices } from "../api/client";
+import { Link } from "react-router-dom";
+import { getBookings, getAnalytics } from "../api/client";
 import useStore from "../store/useStore";
 import { useT } from "../i18n";
 import InstallBanner from "../components/InstallBanner";
+import EmptyState from "../components/EmptyState";
 import dayjs from "dayjs";
+import {
+  IconSparkle, IconCalendar, IconCheck, IconBan, IconClock,
+  IconUsers, IconChart, IconStore, IconChevronRight, IconPlus, IconShield,
+} from "../components/icons";
 
 const STATUS_BADGE = {
   pending: "badge-pending",
@@ -17,123 +23,147 @@ const STATUS_BADGE = {
 function DashboardSkeleton() {
   return (
     <div>
-      <div className="page-header"><div className="skeleton" style={{ width: 160, height: 26 }} /></div>
+      <div className="page-header"><div className="skeleton" style={{ width: 200, height: 28 }} /></div>
       <div className="stats-grid">
         {Array.from({ length: 4 }).map((_, i) => (
           <div className="stat-card" key={i}>
-            <div className="skeleton" style={{ width: 48, height: 30, marginBottom: 8 }} />
+            <div className="skeleton" style={{ width: 34, height: 34, borderRadius: 10, marginBottom: 10 }} />
+            <div className="skeleton" style={{ width: 48, height: 28, marginBottom: 6 }} />
             <div className="skeleton skeleton-text" style={{ width: 64 }} />
           </div>
         ))}
       </div>
       <div className="card">
         {Array.from({ length: 4 }).map((_, i) => (
-          <div key={i} className="skeleton skeleton-text" style={{ width: `${80 - i * 8}%`, height: 16, margin: "12px 0" }} />
+          <div key={i} className="skeleton skeleton-text" style={{ width: `${80 - i * 8}%`, height: 16, margin: "14px 0" }} />
         ))}
       </div>
     </div>
   );
 }
 
+function greetingKey() {
+  const h = new Date().getHours();
+  if (h < 12) return "greeting_morning";
+  if (h < 18) return "greeting_day";
+  return "greeting_evening";
+}
+
 export default function Dashboard() {
-  const { lang, activeBusiness, setActiveBusiness } = useStore();
+  const { lang, user, activeBusiness, businesses } = useStore();
   const t = useT(lang);
-  const [businesses, setBusinesses] = useState([]);
   const [todayBookings, setTodayBookings] = useState([]);
   const [analytics, setAnalytics] = useState(null);
-  const [serviceNames, setServiceNames] = useState({});
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
-    loadData();
-  }, []);
-
-  useEffect(() => {
-    if (activeBusiness) loadBusinessData(activeBusiness.id);
-  }, [activeBusiness]);
-
-  const loadData = async () => {
-    try {
-      const bizList = await getMyBusinesses();
-      setBusinesses(bizList);
-      if (bizList.length > 0 && !activeBusiness) {
-        setActiveBusiness(bizList[0]);
-        await loadBusinessData(bizList[0].id);
-      }
-    } catch (e) {
-      console.error(e);
-    } finally {
+    if (!activeBusiness) {
       setLoading(false);
+      return;
     }
-  };
-
-  const loadBusinessData = async (bizId) => {
-    const today = dayjs().format("YYYY-MM-DD");
-    const [bookings, stats, services] = await Promise.all([
-      getBookings(bizId, { booking_date: today }),
-      getAnalytics(bizId, 7),
-      getServices(bizId),
-    ]);
-    setTodayBookings(bookings);
-    setAnalytics(stats);
-    setServiceNames(
-      Object.fromEntries(services.map((s) => [s.id, s[`name_${lang}`] || s.name_uz]))
-    );
-  };
+    let alive = true;
+    const load = async () => {
+      setLoading(true);
+      try {
+        const today = dayjs().format("YYYY-MM-DD");
+        const [bookings, stats] = await Promise.all([
+          getBookings(activeBusiness.id, { booking_date: today }),
+          getAnalytics(activeBusiness.id, 7),
+        ]);
+        if (!alive) return;
+        setTodayBookings(bookings);
+        setAnalytics(stats);
+      } catch (e) {
+        console.error(e);
+      } finally {
+        if (alive) setLoading(false);
+      }
+    };
+    load();
+    return () => { alive = false; };
+  }, [activeBusiness]);
 
   if (loading) return <DashboardSkeleton />;
 
-  if (businesses.length === 0) {
+  if (!activeBusiness && businesses.length === 0) {
     return (
       <div>
         <div className="page-header"><h1 className="page-title">{t("dashboard")}</h1></div>
-        <div className="card empty-state">
-          <div style={{ fontSize: 48, marginBottom: "var(--space-4)" }}>🏪</div>
-          <h2 style={{ marginBottom: "var(--space-2)", fontSize: "var(--text-lg)" }}>{t("no_business_title")}</h2>
-          <p style={{ color: "var(--gray-500)", marginBottom: "var(--space-6)" }}>{t("no_business_desc")}</p>
-          <a href="/setup" className="btn btn-primary">{t("register_business")}</a>
+        <div className="card">
+          <EmptyState
+            icon={<IconStore size={26} />}
+            title={t("no_business_title")}
+            subtitle={t("no_business_desc")}
+            action={
+              <Link to="/setup" className="btn btn-primary">
+                <IconPlus size={17} /> {t("register_business")}
+              </Link>
+            }
+          />
         </div>
       </div>
     );
   }
 
+  const firstName = (user?.name || "").split(" ")[0];
+  const upcoming = todayBookings.filter((b) => ["pending", "confirmed"].includes(b.status));
+  const svcName = (b) => b[`service_name_${lang}`] || b.service_name_uz || `#${b.service_id}`;
+
+  const QUICK_LINKS = [
+    { to: "/bookings", Icon: IconCalendar, key: "bookings" },
+    { to: "/staff", Icon: IconUsers, key: "staff" },
+    { to: "/schedule", Icon: IconClock, key: "schedule" },
+    { to: "/analytics", Icon: IconChart, key: "analytics" },
+    ...(user?.role === "super_admin" ? [{ to: "/admin", Icon: IconShield, key: "admin" }] : []),
+  ];
+
   return (
-    <div className="animate-in">
+    <div className="stagger">
       <InstallBanner />
+
       <div className="page-header">
-        <h1 className="page-title">{t("dashboard")}</h1>
-        {businesses.length > 1 && (
-          <select
-            value={activeBusiness?.id || ""}
-            onChange={(e) => {
-              const biz = businesses.find((b) => b.id === parseInt(e.target.value));
-              setActiveBusiness(biz);
-            }}
-            style={{ width: "auto", maxWidth: 220 }}
-          >
-            {businesses.map((b) => (
-              <option key={b.id} value={b.id}>{b.name}</option>
-            ))}
-          </select>
-        )}
+        <div>
+          <div className="eyebrow" style={{ display: "flex", alignItems: "center", gap: 6 }}>
+            <IconSparkle size={13} /> {dayjs().format("DD.MM.YYYY")}
+          </div>
+          <h1 className="page-title" style={{ marginTop: 4 }}>
+            {t(greetingKey())}{firstName ? `, ${firstName}` : ""}
+          </h1>
+          <p className="page-subtitle">{activeBusiness?.name}</p>
+        </div>
+        <Link to="/bookings" className="btn btn-primary">
+          <IconPlus size={17} /> {t("new_booking")}
+        </Link>
       </div>
 
       {analytics && (
         <div className="stats-grid">
           <div className="stat-card">
-            <div className="stat-value" style={{ color: "var(--brand-600)" }}>{todayBookings.length}</div>
-            <div className="stat-label">{t("today")}</div>
+            <div className="stat-head">
+              <span className="stat-icon honey"><IconClock size={18} /></span>
+            </div>
+            <div className="stat-value" style={{ color: "var(--brand-700)" }}>{upcoming.length}</div>
+            <div className="stat-label">{t("today_remaining")}</div>
           </div>
           <div className="stat-card">
+            <div className="stat-head">
+              <span className="stat-icon"><IconCalendar size={18} /></span>
+            </div>
             <div className="stat-value">{analytics.total_bookings}</div>
             <div className="stat-label">{t("last_7_days")}</div>
           </div>
           <div className="stat-card">
-            <div className="stat-value">{analytics.by_status?.confirmed || 0}</div>
+            <div className="stat-head">
+              <span className="stat-icon blue"><IconCheck size={18} /></span>
+            </div>
+            <div className="stat-value">{(analytics.by_status?.confirmed || 0) + (analytics.by_status?.completed || 0)}</div>
             <div className="stat-label">{t("confirmed")}</div>
           </div>
           <div className="stat-card">
-            <div className="stat-value" style={{ color: "var(--danger)" }}>
+            <div className="stat-head">
+              <span className="stat-icon red"><IconBan size={18} /></span>
+            </div>
+            <div className="stat-value" style={{ color: analytics.by_status?.no_show ? "var(--danger)" : undefined }}>
               {analytics.by_status?.no_show || 0}
             </div>
             <div className="stat-label">{t("no_show")}</div>
@@ -141,39 +171,62 @@ export default function Dashboard() {
         </div>
       )}
 
-      <div className="card">
-        <h2 style={{ fontSize: "var(--text-md)", fontWeight: 700, marginBottom: "var(--space-4)", letterSpacing: "-0.01em" }}>
-          {t("todays_schedule")} · {dayjs().format("DD MMMM")}
-        </h2>
+      {/* Today's schedule */}
+      <div className="card" style={{ marginBottom: "var(--space-4)" }}>
+        <div className="row" style={{ justifyContent: "space-between", marginBottom: "var(--space-4)" }}>
+          <div>
+            <h2 className="card-title">{t("todays_schedule")}</h2>
+            <div className="card-sub">{dayjs().format("DD MMMM")}</div>
+          </div>
+          <Link to="/bookings" className="btn btn-ghost btn-sm">
+            {t("view_all")} <IconChevronRight size={15} />
+          </Link>
+        </div>
+
         {todayBookings.length === 0 ? (
-          <p className="empty-state" style={{ padding: "var(--space-6) 0" }}>{t("no_data")}</p>
+          <EmptyState icon={<IconCalendar size={24} />} title={t("no_bookings_today")} subtitle={t("no_bookings_today_sub")} />
         ) : (
-          <table className="table">
-            <thead>
-              <tr>
-                <th>{t("time")}</th>
-                <th>{t("customer")}</th>
-                <th>{t("service")}</th>
-                <th>{t("status")}</th>
-              </tr>
-            </thead>
-            <tbody>
-              {todayBookings.map((b) => (
-                <tr key={b.id}>
-                  <td style={{ fontWeight: 700, color: "var(--gray-900)" }}>{b.start_time?.slice(0, 5)}</td>
-                  <td>
-                    <div style={{ fontWeight: 600 }}>{b.customer_name}</div>
-                    <div style={{ fontSize: "var(--text-xs)", color: "var(--gray-500)" }}>{b.customer_phone}</div>
-                  </td>
-                  <td>{serviceNames[b.service_id] || `#${b.service_id}`}</td>
-                  <td>
-                    <span className={`badge ${STATUS_BADGE[b.status] || ""}`}>{t(b.status)}</span>
-                  </td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
+          <div className="stack" style={{ gap: "var(--space-2)" }}>
+            {todayBookings.map((b) => (
+              <div
+                key={b.id}
+                className={`booking-card card-tight${["cancelled_by_customer", "cancelled_by_business", "no_show"].includes(b.status) ? " is-muted" : ""}`}
+                style={{ boxShadow: "none", padding: "var(--space-3)" }}
+              >
+                <div className="booking-time">
+                  <span className="t1">{b.start_time?.slice(0, 5)}</span>
+                  <span className="t2">{b.end_time?.slice(0, 5)}</span>
+                </div>
+                <div className="booking-main">
+                  <div style={{ fontWeight: 700 }} className="ellipsis">{b.customer_name}</div>
+                  <div className="booking-meta">
+                    <span>{svcName(b)}</span>
+                    {b.staff_name && <><span>·</span><span>{b.staff_name}</span></>}
+                  </div>
+                </div>
+                <span className={`badge ${STATUS_BADGE[b.status] || ""}`} style={{ alignSelf: "center" }}>
+                  {t(b.status)}
+                </span>
+              </div>
+            ))}
+          </div>
         )}
+      </div>
+
+      {/* Quick links — also the only mobile path to Staff/Schedule */}
+      <div
+        style={{
+          display: "grid", gap: "var(--space-3)",
+          gridTemplateColumns: "repeat(auto-fill, minmax(150px, 1fr))",
+        }}
+      >
+        {QUICK_LINKS.map(({ to, Icon, key }) => (
+          <Link key={to} to={to} className="card card-tight card-interactive row" style={{ gap: 12 }}>
+            <span className="stat-icon" style={{ flexShrink: 0 }}><Icon size={18} /></span>
+            <span style={{ fontWeight: 700, fontSize: "var(--text-sm)", color: "var(--gray-800)" }}>{t(key)}</span>
+            <IconChevronRight size={15} style={{ marginLeft: "auto", color: "var(--gray-300)" }} />
+          </Link>
+        ))}
       </div>
     </div>
   );

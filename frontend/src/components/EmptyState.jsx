@@ -1,27 +1,25 @@
+import { IconNote } from "./icons";
+
 /**
  * Shared empty / no-data / error placeholder.
- * Wraps the existing .empty-state design-system class so every page renders
- * the SAME structure (icon → title → subtitle → optional action).
+ * `icon` accepts a rendered element (an SVG icon from ./icons); legacy emoji
+ * strings still render for any stragglers.
  */
-export default function EmptyState({ icon = "📭", title, subtitle, action }) {
+export default function EmptyState({ icon, title, subtitle, action }) {
   return (
-    <div className="empty-state">
-      {icon && (
-        <div aria-hidden style={{ fontSize: 40, lineHeight: 1, marginBottom: "var(--space-3)", opacity: 0.65 }}>
-          {icon}
-        </div>
-      )}
-      {title && (
-        <h3 style={{ fontSize: "var(--text-md)", fontWeight: 700, color: "var(--gray-700)", marginBottom: "var(--space-1)" }}>
-          {title}
-        </h3>
-      )}
-      {subtitle && (
-        <p style={{ fontSize: "var(--text-sm)", color: "var(--gray-500)", maxWidth: 320, margin: "0 auto", lineHeight: 1.5 }}>
-          {subtitle}
-        </p>
-      )}
-      {action && <div style={{ marginTop: "var(--space-4)" }}>{action}</div>}
+    <div className="empty-state animate-in">
+      <div className="empty-ico" aria-hidden>
+        {icon && typeof icon !== "string" ? (
+          icon
+        ) : icon ? (
+          <span style={{ fontSize: 26 }}>{icon}</span>
+        ) : (
+          <IconNote size={26} />
+        )}
+      </div>
+      {title && <h3 className="empty-title">{title}</h3>}
+      {subtitle && <p className="empty-sub">{subtitle}</p>}
+      {action && <div style={{ marginTop: "var(--space-5)" }}>{action}</div>}
     </div>
   );
 }

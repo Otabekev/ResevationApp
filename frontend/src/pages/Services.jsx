@@ -1,16 +1,25 @@
 import { useEffect, useState } from "react";
-import { getServices, createService, updateService, deleteService } from "../api/client";
+import { getServices, createService, updateService } from "../api/client";
 import useStore from "../store/useStore";
 import { useT } from "../i18n";
 import { SkeletonList } from "../components/Skeleton";
 import EmptyState from "../components/EmptyState";
+import Modal from "../components/Modal";
+import Toast from "../components/Toast";
+import { IconPlus, IconScissors, IconClock, IconEdit, IconCheck } from "../components/icons";
 
 const EMPTY_FORM = {
   name_uz: "", name_ru: "", name_en: "",
+  description_uz: "", description_ru: "", description_en: "",
   duration_minutes: 30, buffer_before_minutes: 0, buffer_after_minutes: 0,
   price: "", currency: "UZS",
   requires_confirmation: false, is_active: true, sort_order: 0,
 };
+
+function fmtPrice(price, t) {
+  if (price === null || price === undefined || price === "") return t("free");
+  return `${parseInt(price, 10).toLocaleString()} ${t("uzs")}`;
+}
 
 export default function Services() {
   const { lang, activeBusiness } = useStore();
@@ -20,8 +29,10 @@ export default function Services() {
   const [editing, setEditing] = useState(null);
   const [form, setForm] = useState(EMPTY_FORM);
   const [saving, setSaving] = useState(false);
-  const [saveError, setSaveError] = useState(false);
+  const [saveError, setSaveError] = useState("");
   const [loading, setLoading] = useState(true);
+  const [toast, setToast] = useState(null);
+  const [showDescriptions, setShowDescriptions] = useState(false);
 
   useEffect(() => {
     if (activeBusiness) load();
@@ -32,25 +43,48 @@ export default function Services() {
     try {
       const data = await getServices(activeBusiness.id);
       setServices(data);
+    } catch {
+      setToast({ message: t("error"), variant: "error" });
     } finally {
       setLoading(false);
     }
   };
 
-  const openNew = () => { setForm(EMPTY_FORM); setEditing(null); setSaveError(false); setShowModal(true); };
+  const openNew = () => {
+    setForm(EMPTY_FORM);
+    setEditing(null);
+    setSaveError("");
+    setShowDescriptions(false);
+    setShowModal(true);
+  };
+
   const openEdit = (svc) => {
-    setForm({ ...svc, price: svc.price ?? "" });
+    setForm({
+      ...EMPTY_FORM,
+      ...svc,
+      price: svc.price ?? "",
+      description_uz: svc.description_uz || "",
+      description_ru: svc.description_ru || "",
+      description_en: svc.description_en || "",
+    });
     setEditing(svc.id);
-    setSaveError(false);
+    setSaveError("");
+    setShowDescriptions(Boolean(svc.description_uz || svc.description_ru || svc.description_en));
     setShowModal(true);
   };
 
   const handleSave = async (e) => {
     e.preventDefault();
     setSaving(true);
-    setSaveError(false);
+    setSaveError("");
     try {
-      const payload = { ...form, price: form.price === "" ? null : parseFloat(form.price) };
+      const payload = {
+        ...form,
+        price: form.price === "" ? null : parseFloat(form.price),
+        description_uz: form.description_uz || null,
+        description_ru: form.description_ru || null,
+        description_en: form.description_en || null,
+      };
       if (editing) {
         await updateService(activeBusiness.id, editing, payload);
       } else {
@@ -58,108 +92,193 @@ export default function Services() {
       }
       await load();
       setShowModal(false);
+      setToast({ message: t("saved"), variant: "success" });
     } catch (err) {
-      setSaveError(true);
+      setSaveError(err.response?.data?.detail?.[0]?.msg || t("service_save_error"));
     } finally {
       setSaving(false);
     }
   };
 
   const handleToggle = async (svc) => {
-    await updateService(activeBusiness.id, svc.id, { is_active: !svc.is_active });
-    await load();
+    try {
+      await updateService(activeBusiness.id, svc.id, { is_active: !svc.is_active });
+      await load();
+    } catch {
+      setToast({ message: t("error"), variant: "error" });
+    }
   };
 
-  if (!activeBusiness) return <EmptyState title={t("select_business_first")} />;
+  if (!activeBusiness) {
+    return <EmptyState icon={<IconScissors size={26} />} title={t("select_business_first")} subtitle={t("select_business_desc")} />;
+  }
 
   return (
-    <div>
+    <div className="animate-in">
       <div className="page-header">
-        <h1 className="page-title">{t("services")}</h1>
-        <button className="btn btn-primary" onClick={openNew}>+ {t("new_service")}</button>
+        <div>
+          <h1 className="page-title">{t("services")}</h1>
+          <p className="page-subtitle">{t("services_subtitle")}</p>
+        </div>
+        <button className="btn btn-primary" onClick={openNew}>
+          <IconPlus size={17} /> {t("new_service")}
+        </button>
       </div>
 
       {loading ? (
         <SkeletonList count={4} />
       ) : services.length === 0 ? (
-        <EmptyState icon="✂️" title={t("no_services_title")} subtitle={t("no_services_desc")} />
+        <div className="card">
+          <EmptyState
+            icon={<IconScissors size={24} />}
+            title={t("no_services_title")}
+            subtitle={t("no_services_desc")}
+            action={
+              <button className="btn btn-primary btn-sm" onClick={openNew}>
+                <IconPlus size={15} /> {t("new_service")}
+              </button>
+            }
+          />
+        </div>
       ) : (
-        <div style={{ display: "flex", flexDirection: "column", gap: "var(--space-3)" }}>
+        <div className="stack stagger" style={{ gap: "var(--space-3)" }}>
           {services.map((svc) => (
-            <div key={svc.id} className="card" style={{ display: "flex", alignItems: "center", gap: "var(--space-3)" }}>
-              <div style={{ flex: 1 }}>
-                <div style={{ fontWeight: 700 }}>{svc[`name_${lang}`] || svc.name_uz}</div>
-                <div style={{ fontSize: "var(--text-sm)", color: "var(--gray-500)", marginTop: 2 }}>
-                  ⏱ {svc.duration_minutes} {t("min")}
-                  {` • ${svc.price ? `${parseInt(svc.price).toLocaleString()} ${t("uzs")}` : t("free")}`}
-                  {svc.requires_confirmation && ` • ✋ ${t("manual_confirm")}`}
+            <div
+              key={svc.id}
+              className="card card-tight row"
+              style={{ gap: "var(--space-3)", opacity: svc.is_active ? 1 : 0.6 }}
+            >
+              <span className="stat-icon" style={{ flexShrink: 0 }} aria-hidden>
+                <IconScissors size={17} />
+              </span>
+              <div className="grow">
+                <div style={{ fontWeight: 750 }} className="ellipsis">
+                  {svc[`name_${lang}`] || svc.name_uz}
+                </div>
+                <div className="row" style={{ gap: 6, marginTop: 4, flexWrap: "wrap" }}>
+                  <span className="chip">
+                    <IconClock size={12} /> {svc.duration_minutes} {t("min")}
+                  </span>
+                  <span className="chip brand">{fmtPrice(svc.price, t)}</span>
+                  {(svc.buffer_before_minutes > 0 || svc.buffer_after_minutes > 0) && (
+                    <span className="chip">
+                      +{svc.buffer_before_minutes + svc.buffer_after_minutes} {t("min_buffer")}
+                    </span>
+                  )}
+                  {svc.requires_confirmation && <span className="chip honey">{t("manual_confirm")}</span>}
                 </div>
               </div>
-              <label className="toggle">
-                <input type="checkbox" aria-label={t("is_active")} checked={svc.is_active} onChange={() => handleToggle(svc)} />
+              <label className="toggle" title={t("is_active")}>
+                <input
+                  type="checkbox"
+                  aria-label={t("is_active")}
+                  checked={svc.is_active}
+                  onChange={() => handleToggle(svc)}
+                />
                 <span className="toggle-slider"></span>
               </label>
-              <button className="btn btn-secondary btn-sm" onClick={() => openEdit(svc)}>{t("edit")}</button>
+              <button className="btn btn-secondary btn-sm" onClick={() => openEdit(svc)}>
+                <IconEdit size={15} /> {t("edit")}
+              </button>
             </div>
           ))}
         </div>
       )}
 
       {showModal && (
-        <div className="modal-overlay" onClick={(e) => e.target === e.currentTarget && setShowModal(false)}>
-          <div className="modal">
-            <div className="modal-header">
-              <h3 className="modal-title">{editing ? t("edit") : t("new_service")}</h3>
-              <button className="modal-close" onClick={() => setShowModal(false)}>×</button>
+        <Modal title={editing ? t("edit_service") : t("new_service")} onClose={() => setShowModal(false)}>
+          <form onSubmit={handleSave}>
+            {["uz", "ru", "en"].map((l) => (
+              <div className="form-group" key={l}>
+                <label>{t("name")} ({t(`lang_${l}`)}) *</label>
+                <input
+                  required maxLength={255} value={form[`name_${l}`]}
+                  onChange={(e) => setForm({ ...form, [`name_${l}`]: e.target.value })}
+                />
+              </div>
+            ))}
+
+            <div className="grid-2">
+              <div className="form-group">
+                <label>{t("duration")} ({t("min")}) *</label>
+                <input
+                  type="number" min="5" max="1440" step="5" required value={form.duration_minutes}
+                  onChange={(e) => setForm({ ...form, duration_minutes: parseInt(e.target.value || "0", 10) })}
+                />
+              </div>
+              <div className="form-group">
+                <label>{t("price")} ({t("uzs")})</label>
+                <input
+                  type="number" min="0" value={form.price} placeholder={t("free")}
+                  onChange={(e) => setForm({ ...form, price: e.target.value })}
+                />
+              </div>
+              <div className="form-group">
+                <label>{t("buffer_before")} ({t("min")})</label>
+                <input
+                  type="number" min="0" max="1440" value={form.buffer_before_minutes}
+                  onChange={(e) => setForm({ ...form, buffer_before_minutes: parseInt(e.target.value || "0", 10) })}
+                />
+              </div>
+              <div className="form-group">
+                <label>{t("buffer_after")} ({t("min")})</label>
+                <input
+                  type="number" min="0" max="1440" value={form.buffer_after_minutes}
+                  onChange={(e) => setForm({ ...form, buffer_after_minutes: parseInt(e.target.value || "0", 10) })}
+                />
+              </div>
             </div>
-            <form onSubmit={handleSave}>
-              {["uz", "ru", "en"].map((l) => (
-                <div className="form-group" key={l}>
-                  <label>{t("name")} ({t(`lang_${l}`)})</label>
-                  <input required value={form[`name_${l}`]}
-                    onChange={(e) => setForm({ ...form, [`name_${l}`]: e.target.value })} />
-                </div>
-              ))}
-              <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "var(--space-3)" }}>
-                <div className="form-group">
-                  <label>{t("duration")} ({t("min")})</label>
-                  <input type="number" min="5" required value={form.duration_minutes}
-                    onChange={(e) => setForm({ ...form, duration_minutes: parseInt(e.target.value) })} />
-                </div>
-                <div className="form-group">
-                  <label>{t("price")} ({t("uzs")})</label>
-                  <input type="number" min="0" value={form.price}
-                    onChange={(e) => setForm({ ...form, price: e.target.value })} />
-                </div>
-                <div className="form-group">
-                  <label>{t("buffer_before")} ({t("min")})</label>
-                  <input type="number" min="0" value={form.buffer_before_minutes}
-                    onChange={(e) => setForm({ ...form, buffer_before_minutes: parseInt(e.target.value) })} />
-                </div>
-                <div className="form-group">
-                  <label>{t("buffer_after")} ({t("min")})</label>
-                  <input type="number" min="0" value={form.buffer_after_minutes}
-                    onChange={(e) => setForm({ ...form, buffer_after_minutes: parseInt(e.target.value) })} />
-                </div>
+
+            <div className="form-group row" style={{ justifyContent: "space-between" }}>
+              <div>
+                <div style={{ fontWeight: 650, fontSize: "var(--text-sm)" }}>{t("requires_manual_confirmation")}</div>
+                <div className="form-hint" style={{ marginTop: 2 }}>{t("requires_manual_confirmation_hint")}</div>
               </div>
-              <div className="form-group" style={{ display: "flex", alignItems: "center", gap: "var(--space-3)" }}>
-                <label className="toggle">
-                  <input type="checkbox" aria-label={t("requires_manual_confirmation")} checked={form.requires_confirmation}
-                    onChange={(e) => setForm({ ...form, requires_confirmation: e.target.checked })} />
-                  <span className="toggle-slider"></span>
-                </label>
-                <span style={{ fontSize: "var(--text-sm)" }}>{t("requires_manual_confirmation")}</span>
-              </div>
-              {saveError && (
-                <p style={{ color: "var(--danger)", fontSize: "var(--text-sm)" }}>{t("service_save_error")}</p>
-              )}
-              <button type="submit" className="btn btn-primary btn-full" disabled={saving}>
-                {saving ? t("loading") : t("save")}
+              <label className="toggle">
+                <input
+                  type="checkbox" aria-label={t("requires_manual_confirmation")}
+                  checked={form.requires_confirmation}
+                  onChange={(e) => setForm({ ...form, requires_confirmation: e.target.checked })}
+                />
+                <span className="toggle-slider"></span>
+              </label>
+            </div>
+
+            {!showDescriptions ? (
+              <button
+                type="button"
+                className="btn btn-ghost btn-sm"
+                style={{ marginBottom: "var(--space-3)" }}
+                onClick={() => setShowDescriptions(true)}
+              >
+                <IconPlus size={14} /> {t("add_description")}
               </button>
-            </form>
-          </div>
-        </div>
+            ) : (
+              ["uz", "ru", "en"].map((l) => (
+                <div className="form-group" key={`d-${l}`}>
+                  <label>{t("description")} ({t(`lang_${l}`)})</label>
+                  <textarea
+                    rows={2} maxLength={2000} value={form[`description_${l}`]}
+                    onChange={(e) => setForm({ ...form, [`description_${l}`]: e.target.value })}
+                  />
+                </div>
+              ))
+            )}
+
+            {saveError && <p className="form-error" style={{ marginBottom: "var(--space-3)" }}>{saveError}</p>}
+
+            <button type="submit" className="btn btn-primary btn-full" disabled={saving}>
+              {saving ? t("loading") : (
+                <>
+                  <IconCheck size={16} /> {t("save")}
+                </>
+              )}
+            </button>
+          </form>
+        </Modal>
       )}
+
+      <Toast toast={toast} onClose={() => setToast(null)} />
     </div>
   );
 }

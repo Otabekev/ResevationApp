@@ -54,6 +54,7 @@ DATABASE_URL=postgresql+asyncpg://user:pass@...neon.tech/neondb?ssl=require
 REDIS_URL=rediss://default:xxx@eu1-xxx.upstash.io:6379
 SECRET_KEY=<generate with: python -c "import secrets; print(secrets.token_hex(32))">
 TELEGRAM_BOT_TOKEN=123456:ABCDEF...
+TELEGRAM_BOT_USERNAME=YourBot_bot   # bot @-handle WITHOUT @ — required for invite/login/booking links
 TELEGRAM_WEBHOOK_SECRET=<another random hex>
 WEBHOOK_BASE_URL=https://your-backend.railway.app
 BOT_SECRET=<another random hex>
@@ -177,10 +178,4 @@ cd bot
 pip install -r requirements.txt
 python main.py
 
-# 4. Frontend (separate terminal)
-cd frontend
-npm install
-npm run dev
-```
-
-Access the app at `http://localhost:5173`
+# 4. Fronten

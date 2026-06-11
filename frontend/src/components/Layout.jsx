@@ -1,38 +1,167 @@
-import { NavLink } from "react-router-dom";
+import { useEffect, useRef, useState } from "react";
+import { NavLink, useNavigate } from "react-router-dom";
 import useStore from "../store/useStore";
 import { useT } from "../i18n";
+import { updateMyLanguage } from "../api/client";
+import {
+  IconHome, IconCalendar, IconScissors, IconUsers, IconClock, IconChart,
+  IconSettings, IconShield, IconChevronDown, IconLogout, IconGlobe, IconCheck,
+} from "./icons";
 
 const NAV_ITEMS = [
-  { path: "/", icon: "🏠", key: "dashboard", mobile: true },
-  { path: "/bookings", icon: "📅", key: "bookings", mobile: true },
-  { path: "/services", icon: "✂️", key: "services", mobile: true },
-  { path: "/staff", icon: "👥", key: "staff", mobile: true },
-  { path: "/schedule", icon: "🗓️", key: "schedule", mobile: false },
-  { path: "/analytics", icon: "📊", key: "analytics", mobile: false },
-  { path: "/settings", icon: "⚙️", key: "settings", mobile: true },
+  { path: "/", Icon: IconHome, key: "dashboard", mobile: true },
+  { path: "/bookings", Icon: IconCalendar, key: "bookings", mobile: true },
+  { path: "/services", Icon: IconScissors, key: "services", mobile: true },
+  { path: "/staff", Icon: IconUsers, key: "staff", mobile: false },
+  { path: "/schedule", Icon: IconClock, key: "schedule", mobile: false },
+  { path: "/analytics", Icon: IconChart, key: "analytics", mobile: true },
+  { path: "/settings", Icon: IconSettings, key: "settings", mobile: true },
 ];
 
-// Native language names so a user always recognises their own language.
 const LANGS = [
   { code: "uz", label: "O‘zbekcha" },
   { code: "ru", label: "Русский" },
   { code: "en", label: "English" },
 ];
 
-function LanguageSwitcher({ className }) {
-  const { lang, setLang } = useStore();
+function LogoMark({ size = 34 }) {
   return (
-    <div className={`lang-switcher ${className || ""}`}>
-      <span aria-hidden className="lang-switcher-icon">🌐</span>
-      <select
-        aria-label="Language"
-        value={lang}
-        onChange={(e) => setLang(e.target.value)}
+    <span className="logo-mark" style={{ width: size, height: size }} aria-hidden>
+      <svg width={size * 0.56} height={size * 0.56} viewBox="0 0 24 24" fill="none">
+        {/* Rezerv mark: an "R" cut as a bookmark/calendar tab */}
+        <path
+          d="M6 3.5h8.2a4.3 4.3 0 0 1 1.6 8.3L19.5 17h-3.8l-3-4.4H9.5V17H6V3.5Zm3.5 3v3.2h4.3a1.6 1.6 0 1 0 0-3.2H9.5Z"
+          fill="#fff"
+        />
+        <path d="M6 17h3.5v3.5L7.75 19 6 20.5V17Z" fill="#fff" opacity=".75" />
+      </svg>
+    </span>
+  );
+}
+
+function initials(name = "") {
+  return name
+    .split(" ")
+    .filter(Boolean)
+    .slice(0, 2)
+    .map((w) => w[0].toUpperCase())
+    .join("") || "R";
+}
+
+function useClickOutside(ref, onAway) {
+  useEffect(() => {
+    const handler = (e) => {
+      if (ref.current && !ref.current.contains(e.target)) onAway();
+    };
+    document.addEventListener("pointerdown", handler);
+    return () => document.removeEventListener("pointerdown", handler);
+  }, [ref, onAway]);
+}
+
+function BusinessSwitcher() {
+  const { activeBusiness, businesses, setActiveBusiness } = useStore();
+  const [open, setOpen] = useState(false);
+  const ref = useRef(null);
+  useClickOutside(ref, () => setOpen(false));
+
+  if (!activeBusiness) return null;
+  const many = businesses.length > 1;
+
+  return (
+    <div className="menu-wrap" ref={ref}>
+      <button
+        type="button"
+        className="biz-switcher"
+        onClick={() => many && setOpen((o) => !o)}
+        style={{ cursor: many ? "pointer" : "default" }}
+        aria-haspopup={many ? "menu" : undefined}
+        aria-expanded={open}
       >
-        {LANGS.map((l) => (
-          <option key={l.code} value={l.code}>{l.label}</option>
-        ))}
-      </select>
+        <span className="biz-dot">{initials(activeBusiness.name)}</span>
+        <span className="biz-name">{activeBusiness.name}</span>
+        {many && <IconChevronDown size={15} style={{ color: "var(--gray-400)", flexShrink: 0 }} />}
+      </button>
+      {open && (
+        <div className="menu" role="menu">
+          {businesses.map((b) => (
+            <button
+              key={b.id}
+              type="button"
+              role="menuitem"
+              className="menu-item"
+              onClick={() => { setActiveBusiness(b); setOpen(false); }}
+            >
+              <span className="biz-dot" style={{ width: 24, height: 24, fontSize: 11 }}>{initials(b.name)}</span>
+              <span className="grow ellipsis">{b.name}</span>
+              {b.id === activeBusiness.id && <IconCheck size={15} style={{ color: "var(--brand-600)" }} />}
+            </button>
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
+
+function UserMenu() {
+  const { user, lang, setLang, logout } = useStore();
+  const t = useT(lang);
+  const navigate = useNavigate();
+  const [open, setOpen] = useState(false);
+  const ref = useRef(null);
+  useClickOutside(ref, () => setOpen(false));
+
+  const changeLang = (code) => {
+    setLang(code);
+    updateMyLanguage(code).catch(() => {}); // persist server-side; cosmetic if it fails
+  };
+
+  const handleLogout = () => {
+    logout();
+    navigate("/login");
+  };
+
+  return (
+    <div className="menu-wrap" ref={ref}>
+      <button
+        type="button"
+        className="avatar"
+        onClick={() => setOpen((o) => !o)}
+        aria-haspopup="menu"
+        aria-expanded={open}
+        aria-label={user?.name || "Account"}
+        style={{ cursor: "pointer" }}
+      >
+        {initials(user?.name)}
+      </button>
+      {open && (
+        <div className="menu" role="menu">
+          <div style={{ padding: "10px 12px 6px" }}>
+            <div style={{ fontWeight: 750, fontSize: "var(--text-sm)" }} className="ellipsis">{user?.name}</div>
+            <div style={{ fontSize: "var(--text-xs)", color: "var(--gray-500)" }}>{t(`role_${user?.role}`) || user?.role}</div>
+          </div>
+          <div className="menu-divider" />
+          <div className="menu-label" style={{ display: "flex", alignItems: "center", gap: 6 }}>
+            <IconGlobe size={13} /> {t("language")}
+          </div>
+          {LANGS.map((l) => (
+            <button
+              key={l.code}
+              type="button"
+              role="menuitem"
+              className="menu-item"
+              onClick={() => changeLang(l.code)}
+            >
+              <span className="grow">{l.label}</span>
+              {lang === l.code && <IconCheck size={15} style={{ color: "var(--brand-600)" }} />}
+            </button>
+          ))}
+          <div className="menu-divider" />
+          <button type="button" role="menuitem" className="menu-item danger" onClick={handleLogout}>
+            <IconLogout size={17} />
+            {t("logout")}
+          </button>
+        </div>
+      )}
     </div>
   );
 }
@@ -42,7 +171,7 @@ export default function Layout({ children }) {
   const t = useT(lang);
 
   const allNav = user?.role === "super_admin"
-    ? [...NAV_ITEMS, { path: "/admin", icon: "🛡️", key: "admin" }]
+    ? [...NAV_ITEMS, { path: "/admin", Icon: IconShield, key: "admin", mobile: false }]
     : NAV_ITEMS;
 
   return (
@@ -50,18 +179,11 @@ export default function Layout({ children }) {
       {/* Desktop sidebar */}
       <aside className="sidebar">
         <div className="sidebar-logo">
-          <span
-            aria-hidden
-            style={{
-              width: 30, height: 30, borderRadius: 9, flexShrink: 0,
-              background: "linear-gradient(160deg, var(--brand-400), var(--brand-600))",
-              display: "inline-flex", alignItems: "center", justifyContent: "center",
-              fontSize: 17, fontWeight: 800, letterSpacing: "-0.04em", color: "#fff",
-            }}
-          >
-            R
+          <LogoMark />
+          <span className="logo-word">
+            Rezerv
+            <small>{t("brand_tagline")}</small>
           </span>
-          Rezerv
         </div>
         <nav className="sidebar-nav">
           {allNav.map((item) => (
@@ -70,25 +192,40 @@ export default function Layout({ children }) {
               to={item.path}
               end={item.path === "/"}
               aria-label={t(item.key)}
-              title={t(item.key)}
               className={({ isActive }) => `nav-item${isActive ? " active" : ""}`}
             >
-              <span aria-hidden>{item.icon}</span>
+              <item.Icon size={19} />
               {t(item.key)}
             </NavLink>
           ))}
         </nav>
         <div className="sidebar-footer">
-          <LanguageSwitcher className="lang-switcher-desktop" />
-          {user?.name && <div className="sidebar-user">{user.name}</div>}
+          <div style={{ fontSize: "var(--text-xs)", color: "rgba(255,255,255,.4)", padding: "0 6px" }}>
+            © {new Date().getFullYear()} Rezerv
+          </div>
         </div>
       </aside>
 
-      {/* Mobile floating language control (sidebar is hidden under 768px) */}
-      <LanguageSwitcher className="lang-switcher-mobile" />
+      <div className="content-col">
+        {/* Desktop topbar */}
+        <header className="topbar">
+          <BusinessSwitcher />
+          <div className="topbar-spacer" />
+          <UserMenu />
+        </header>
 
-      {/* Main content */}
-      <main className="main-content">{children}</main>
+        {/* Mobile app bar */}
+        <header className="appbar">
+          <LogoMark size={30} />
+          <span className="appbar-title grow">Rezerv</span>
+          <UserMenu />
+        </header>
+
+        {/* Main content */}
+        <main className="main-content">
+          <div className="page">{children}</div>
+        </main>
+      </div>
 
       {/* Mobile bottom nav */}
       <nav className="bottom-nav">
@@ -100,7 +237,7 @@ export default function Layout({ children }) {
             aria-label={t(item.key)}
             className={({ isActive }) => `bottom-nav-item${isActive ? " active" : ""}`}
           >
-            <span aria-hidden>{item.icon}</span>
+            <item.Icon size={21} />
             {t(item.key)}
           </NavLink>
         ))}

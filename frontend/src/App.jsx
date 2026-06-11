@@ -1,6 +1,6 @@
 import { useEffect, useState } from "react";
 import { BrowserRouter, Navigate, Route, Routes } from "react-router-dom";
-import { getMe } from "./api/client";
+import { getMe, getMyBusinesses } from "./api/client";
 import useStore from "./store/useStore";
 import Layout from "./components/Layout";
 import Dashboard from "./pages/Dashboard";
@@ -15,18 +15,31 @@ import AdminPanel from "./pages/AdminPanel";
 import Login from "./pages/Login";
 
 export default function App() {
-  const { isAuthenticated, setAuth, user } = useStore();
+  const {
+    isAuthenticated, setAuth, user,
+    activeBusiness, setActiveBusiness, setBusinesses,
+  } = useStore();
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
-    // Rezerv is a real web PWA — there's no Mini App entry point any more.
-    // We hydrate from a stored JWT (set either by the Telegram Login Widget
-    // callback on /login or by a dev-mode token paste).
+    // Hydrate from a stored JWT (set by the bot-login flow on /login).
     const init = async () => {
       try {
         if (localStorage.getItem("access_token")) {
           const me = await getMe();
           setAuth(me, localStorage.getItem("access_token"));
+
+          // Load the owner's businesses once, centrally — the topbar switcher
+          // and every page read them from the store.
+          const bizList = await getMyBusinesses().catch(() => []);
+          setBusinesses(bizList);
+          const stillValid = activeBusiness && bizList.some((b) => b.id === activeBusiness.id);
+          if (stillValid) {
+            // refresh the stored copy with current data
+            setActiveBusiness(bizList.find((b) => b.id === activeBusiness.id));
+          } else {
+            setActiveBusiness(bizList[0] || null);
+          }
         }
       } catch {
         // Not authenticated — Login screen will render.

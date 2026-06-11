@@ -1,6 +1,7 @@
 import { useEffect, useState } from "react";
 import useStore from "../store/useStore";
 import { useT } from "../i18n";
+import { IconInstall } from "./icons";
 
 const DISMISS_KEY = "install_dismissed_at";
 const SUPPRESSION_DAYS = 7;
@@ -15,22 +16,14 @@ function isSuppressed() {
 function isStandalone() {
   return (
     window.matchMedia?.("(display-mode: standalone)").matches ||
-    // iOS Safari's legacy flag
-    window.navigator.standalone === true
+    window.navigator.standalone === true // iOS Safari legacy flag
   );
 }
 
 /**
  * Soft "Install Rezerv" banner shown on the Dashboard.
- *
- * Only renders when:
- *   • Chrome/Edge captured `beforeinstallprompt` (PWA is installable)
- *   • User hasn't dismissed within the last 7 days
- *   • App isn't already running in standalone mode
- *
- * iOS Safari doesn't fire `beforeinstallprompt`, so this banner is Android/desktop
- * Chrome only — iOS users install via Share → Add to Home Screen, which is
- * documented in the README/help but not surfaced here (scope cut for v1).
+ * Renders only when the browser captured `beforeinstallprompt` (installable),
+ * the user hasn't dismissed it in 7 days, and we're not already standalone.
  */
 export default function InstallBanner() {
   const { lang } = useStore();
@@ -72,17 +65,27 @@ export default function InstallBanner() {
       className="card animate-in"
       style={{
         marginBottom: "var(--space-4)",
-        background: "var(--brand-50)",
+        background: "linear-gradient(120deg, var(--brand-50), #fff 70%)",
         border: "1px solid var(--brand-100)",
         display: "flex",
         alignItems: "center",
         gap: "var(--space-3)",
         flexWrap: "wrap",
+        padding: "var(--space-4)",
       }}
     >
-      <span aria-hidden style={{ fontSize: 28, lineHeight: 1 }}>📲</span>
+      <span
+        aria-hidden
+        style={{
+          width: 42, height: 42, borderRadius: 12, flexShrink: 0,
+          background: "var(--brand-600)", color: "#fff",
+          display: "inline-flex", alignItems: "center", justifyContent: "center",
+        }}
+      >
+        <IconInstall size={22} />
+      </span>
       <div style={{ flex: 1, minWidth: 200 }}>
-        <div style={{ fontWeight: 700, fontSize: "var(--text-sm)", color: "var(--brand-800)" }}>
+        <div style={{ fontWeight: 750, fontSize: "var(--text-sm)", color: "var(--brand-800)" }}>
           {t("install_app_cta")}
         </div>
         <div style={{ fontSize: "var(--text-xs)", color: "var(--gray-600)", marginTop: 2 }}>
