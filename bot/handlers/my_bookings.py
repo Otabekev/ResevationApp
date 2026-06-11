@@ -58,7 +58,7 @@ async def my_bookings(callback: CallbackQuery, state: FSMContext) -> None:
         if b.get("status") in ("pending", "confirmed"):
             rows.append([
                 InlineKeyboardButton(
-                    text=f"❌ Cancel #{b['id']}",
+                    text=t("cancel_n", lang, id=b["id"]),
                     callback_data=f"cancel_booking_{b['id']}",
                 )
             ])
@@ -89,7 +89,7 @@ async def cancel_booking(callback: CallbackQuery, state: FSMContext) -> None:
             ]),
         )
     except Exception:
-        await callback.answer("Error cancelling booking", show_alert=True)
+        await callback.answer(t("cancel_failed", lang), show_alert=True)
 
     await callback.answer()
 
@@ -116,6 +116,6 @@ async def handle_review_rating(callback: CallbackQuery, state: FSMContext) -> No
             ]),
         )
     except Exception:
-        await callback.answer("Could not submit review", show_alert=True)
+        await callback.answer(t("review_failed", lang), show_alert=True)
 
     await callback.answer()

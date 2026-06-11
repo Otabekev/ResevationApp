@@ -66,15 +66,24 @@ async def cmd_start(message: Message, state: FSMContext) -> None:
         await _handle_join(message, state, start_param[5:])
         return
     if start_param.startswith("book_"):
-        # book_{business_id} — direct booking link
-        business_id = start_param[5:]
-        await state.update_data(selected_business_id=int(business_id))
-        await message.answer(
-            t("choose_service", lang),
-            reply_markup=InlineKeyboardMarkup(inline_keyboard=[
-                [InlineKeyboardButton(text=t("book_appointment", lang), callback_data=f"biz_{business_id}")]
-            ])
-        )
+        # book_{business_id} — direct booking link (Instagram bio, share button)
+        raw_id = start_param[5:]
+        if not raw_id.isdigit():
+            await message.answer(t("start", lang), parse_mode="HTML", reply_markup=main_menu_keyboard(lang))
+            return
+        try:
+            biz = await api_client.get_public_business(int(raw_id))
+            await state.update_data(business_id=int(raw_id), business_name=biz.get("name", "—"))
+            await message.answer(
+                f"🏪 <b>{biz.get('name', '')}</b>\n📍 {biz.get('address', '')}",
+                parse_mode="HTML",
+                reply_markup=InlineKeyboardMarkup(inline_keyboard=[
+                    [InlineKeyboardButton(text=t("book_appointment", lang), callback_data=f"biz_{raw_id}")],
+                    [InlineKeyboardButton(text=t("back", lang), callback_data="main_menu")],
+                ])
+            )
+        except Exception:
+            await message.answer(t("server_error", lang), reply_markup=main_menu_keyboard(lang))
         return
     if start_param.startswith("login_"):
         # login_{nonce} — web dashboard login. Ask the user to confirm so a
@@ -147,6 +156,16 @@ async def set_language(callback: CallbackQuery, state: FSMContext) -> None:
     if new_lang not in ("uz", "ru", "en"):
         new_lang = "uz"
     await state.update_data(lang=new_lang)
+
+    # Persist to the backend so reminders/notifications switch language too.
+    data = await state.get_data()
+    token = data.get("access_token")
+    if token:
+        try:
+            await api_client.update_language(token, new_lang)
+        except Exception:
+            pass  # cosmetic — the FSM language is already updated
+
     await callback.message.edit_text(
         t("lang_selected", new_lang),
         reply_markup=main_menu_keyboard(new_lang),

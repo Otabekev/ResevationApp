@@ -43,6 +43,18 @@ async def complete_web_login(
         return resp.json()
 
 
+async def update_language(token: str, language: str) -> None:
+    """Persist the user's language so backend notifications match the bot."""
+    async with httpx.AsyncClient() as client:
+        resp = await client.patch(
+            f"{BACKEND_URL}/auth/me/language",
+            json={"language": language},
+            headers={"Authorization": f"Bearer {token}"},
+            timeout=10,
+        )
+        resp.raise_for_status()
+
+
 async def get_categories() -> list[dict]:
     async with httpx.AsyncClient() as client:
         resp = await client.get(f"{BACKEND_URL}/businesses/categories", timeout=10)
