@@ -29,6 +29,21 @@ class CategoryCreate(BaseModel):
     sort_order: int = 0
 
 
+class CategoryUpdate(BaseModel):
+    """Explicit allow-list of mutable fields — never setattr from a raw dict."""
+    slug: str | None = None
+    name_uz: str | None = None
+    name_ru: str | None = None
+    name_en: str | None = None
+    icon: str | None = None
+    description_uz: str | None = None
+    description_ru: str | None = None
+    description_en: str | None = None
+    default_slot_step_minutes: int | None = None
+    sort_order: int | None = None
+    is_active: bool | None = None
+
+
 class PlatformStats(BaseModel):
     total_businesses: int
     active_businesses: int
@@ -143,16 +158,15 @@ async def create_category(
 @router.patch("/categories/{category_id}")
 async def update_category(
     category_id: int,
-    body: dict,
+    body: CategoryUpdate,
     _: User = Depends(get_current_super_admin),
     db: AsyncSession = Depends(get_db),
 ):
     cat = await db.get(BusinessCategory, category_id)
     if not cat:
         raise HTTPException(status_code=404)
-    for k, v in body.items():
-        if hasattr(cat, k):
-            setattr(cat, k, v)
+    for k, v in body.model_dump(exclude_none=True).items():
+        setattr(cat, k, v)
     db.add(cat)
     await db.commit()
     await db.refresh(cat)

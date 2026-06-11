@@ -25,6 +25,7 @@ class Settings(BaseSettings):
 
     # Telegram
     telegram_bot_token: str = ""
+    telegram_bot_username: str = ""  # e.g. "QulayNavbat_bot" — used to build t.me deep links
     telegram_webhook_secret: str = ""
     webhook_base_url: str = ""
 
@@ -88,6 +89,8 @@ def validate_runtime_config(s: "Settings") -> None:
         errors.append("BOT_SECRET must be set (>= 16 chars)")
     if not s.telegram_bot_token:
         errors.append("TELEGRAM_BOT_TOKEN must be set")
+    if not s.telegram_bot_username:
+        errors.append("TELEGRAM_BOT_USERNAME must be set (bot username without @, for t.me links)")
     if not s.database_url:
         errors.append("DATABASE_URL must be set")
     if errors:

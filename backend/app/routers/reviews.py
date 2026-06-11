@@ -1,10 +1,11 @@
-from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi import APIRouter, Depends, HTTPException, Request, status
 from pydantic import BaseModel, Field
 from sqlalchemy import and_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.database import get_db
 from app.deps import require_bot_secret
+from app.limiter import limiter
 from app.models.booking import Booking, Customer, Review
 
 router = APIRouter(tags=["reviews"])
@@ -13,7 +14,7 @@ router = APIRouter(tags=["reviews"])
 class ReviewCreate(BaseModel):
     booking_id: int
     rating: int = Field(..., ge=1, le=5)
-    comment: str | None = None
+    comment: str | None = Field(None, max_length=1000)
     telegram_id: int
 
 
@@ -28,7 +29,9 @@ class ReviewOut(BaseModel):
 
 
 @router.post("/reviews", response_model=ReviewOut, status_code=status.HTTP_201_CREATED)
+@limiter.limit("30/minute")
 async def create_review(
+    request: Request,
     body: ReviewCreate,
     db: AsyncSession = Depends(get_db),
     _: None = Depends(require_bot_secret),

@@ -200,7 +200,12 @@ async def create_invite(
     await db.commit()
 
     from app.config import settings
-    invite_url = f"https://t.me/{settings.telegram_bot_token.split(':')[0]}?start=join_{token}"
+
+    # t.me deep links require the bot USERNAME. (Never derive this from the bot
+    # token — that link is dead and leaks the token's numeric prefix.)
+    if not settings.telegram_bot_username:
+        raise HTTPException(status_code=500, detail="TELEGRAM_BOT_USERNAME is not configured")
+    invite_url = f"https://t.me/{settings.telegram_bot_username}?start=join_{token}"
 
     return InviteOut(token=token, invite_url=invite_url, expires_at=expires_at)
 

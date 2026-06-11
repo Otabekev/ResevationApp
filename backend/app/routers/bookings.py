@@ -1,12 +1,13 @@
 from datetime import date, time
 
-from fastapi import APIRouter, Depends, HTTPException, Query, status
-from pydantic import BaseModel
+from fastapi import APIRouter, Depends, HTTPException, Query, Request, status
+from pydantic import BaseModel, Field, field_validator
 from sqlalchemy import and_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.database import get_db
 from app.deps import get_current_business_owner, get_current_user, require_bot_secret
+from app.limiter import limiter
 from app.models.booking import Booking, Customer
 from app.models.business import Business
 from app.models.service import Service
@@ -33,10 +34,16 @@ class BookingCreatePublic(BaseModel):
     staff_id: int | None = None
     booking_date: date
     start_time: time
-    customer_name: str
-    customer_phone: str
-    notes: str | None = None
+    customer_name: str = Field(..., min_length=1, max_length=255)
+    customer_phone: str = Field(..., min_length=7, max_length=20)
+    notes: str | None = Field(None, max_length=1000)
     telegram_id: int  # passed by the bot
+    language: str = "uz"  # customer's bot language — keeps notifications localized
+
+    @field_validator("language")
+    @classmethod
+    def _lang(cls, v: str) -> str:
+        return v if v in ("uz", "ru", "en") else "uz"
 
 
 class BookingCreateManual(BaseModel):
@@ -45,9 +52,9 @@ class BookingCreateManual(BaseModel):
     staff_id: int | None = None
     booking_date: date
     start_time: time
-    customer_name: str
-    customer_phone: str
-    notes: str | None = None
+    customer_name: str = Field(..., min_length=1, max_length=255)
+    customer_phone: str = Field(..., min_length=3, max_length=20)
+    notes: str | None = Field(None, max_length=1000)
 
 
 class BookingOut(BaseModel):
@@ -68,18 +75,78 @@ class BookingOut(BaseModel):
     model_config = {"from_attributes": True}
 
 
+class BookingListItem(BookingOut):
+    """List view enriched with display names so clients never N+1."""
+    service_name_uz: str | None = None
+    service_name_ru: str | None = None
+    service_name_en: str | None = None
+    staff_name: str | None = None
+
+
 class CancelRequest(BaseModel):
-    reason: str | None = None
+    reason: str | None = Field(None, max_length=500)
 
 
 class StatusUpdateRequest(BaseModel):
     status: str  # confirmed | completed | no_show | cancelled_by_business
 
 
+# ── Helpers ──────────────────────────────────────────────────────────────────
+
+async def _notify_business_side(
+    db: AsyncSession, booking: Booking, business: Business, svc_name_for: dict[str, str]
+) -> None:
+    """Alert the owner and (if linked to Telegram) the assigned staff member."""
+    notified: set[int] = set()
+
+    if business and business.owner_id:
+        owner = (
+            await db.execute(select(User).where(User.id == business.owner_id))
+        ).scalar_one_or_none()
+        if owner and owner.telegram_id:
+            notified.add(owner.telegram_id)
+            await send_telegram_message(
+                owner.telegram_id,
+                new_booking_alert_message(
+                    lang=owner.language,
+                    customer_name=booking.customer_name,
+                    service_name=svc_name_for.get(owner.language, svc_name_for["uz"]),
+                    date_str=str(booking.booking_date),
+                    time_str=booking.start_time.strftime("%H:%M"),
+                ),
+            )
+
+    if booking.staff_id:
+        staff = await db.get(Staff, booking.staff_id)
+        if staff and staff.user_id:
+            staff_user = (
+                await db.execute(select(User).where(User.id == staff.user_id))
+            ).scalar_one_or_none()
+            if staff_user and staff_user.telegram_id and staff_user.telegram_id not in notified:
+                await send_telegram_message(
+                    staff_user.telegram_id,
+                    new_booking_alert_message(
+                        lang=staff_user.language,
+                        customer_name=booking.customer_name,
+                        service_name=svc_name_for.get(staff_user.language, svc_name_for["uz"]),
+                        date_str=str(booking.booking_date),
+                        time_str=booking.start_time.strftime("%H:%M"),
+                    ),
+                )
+
+
+def _svc_names(service: Service | None) -> dict[str, str]:
+    if service is None:
+        return {"uz": "—", "ru": "—", "en": "—"}
+    return {"uz": service.name_uz, "ru": service.name_ru, "en": service.name_en}
+
+
 # ── Public booking (Telegram bot) ────────────────────────────────────────────
 
 @router.post("/bookings/public", response_model=BookingOut, status_code=status.HTTP_201_CREATED)
+@limiter.limit("60/minute")
 async def create_public_booking(
+    request: Request,
     body: BookingCreatePublic,
     db: AsyncSession = Depends(get_db),
     _: None = Depends(require_bot_secret),
@@ -97,13 +164,15 @@ async def create_public_booking(
             telegram_id=body.telegram_id,
             name=body.customer_name,
             phone=body.customer_phone,
+            language=body.language,
         )
         db.add(customer)
         await db.flush()
     else:
-        # Update name/phone in case they changed
+        # Update name/phone/language in case they changed
         customer.name = body.customer_name
         customer.phone = body.customer_phone
+        customer.language = body.language
 
     try:
         booking = await create_booking(
@@ -129,7 +198,7 @@ async def create_public_booking(
     staff = await db.get(Staff, booking.staff_id) if booking.staff_id else None
 
     lang = customer.language
-    svc_name = getattr(service, f"name_{lang}", service.name_uz)
+    names = _svc_names(service)
     staff_name = staff.name if staff else "—"
 
     await send_telegram_message(
@@ -137,40 +206,26 @@ async def create_public_booking(
         booking_confirmed_message(
             lang=lang,
             business_name=business.name,
-            service_name=svc_name,
+            service_name=names.get(lang, names["uz"]),
             staff_name=staff_name,
             date_str=str(booking.booking_date),
             time_str=booking.start_time.strftime("%H:%M"),
         ),
     )
 
-    # Notify business owner / staff
-    if business and business.owner_id:
-        owner_result = await db.execute(
-            select(User).where(User.id == business.owner_id)
-        )
-        owner = owner_result.scalar_one_or_none()
-        if owner and owner.telegram_id:
-            await send_telegram_message(
-                owner.telegram_id,
-                new_booking_alert_message(
-                    lang=owner.language,
-                    customer_name=customer.name,
-                    service_name=svc_name,
-                    date_str=str(booking.booking_date),
-                    time_str=booking.start_time.strftime("%H:%M"),
-                ),
-            )
+    await _notify_business_side(db, booking, business, names)
 
     return booking
 
 
 # ── Business owner booking management ────────────────────────────────────────
 
-@router.get("/businesses/{business_id}/bookings", response_model=list[BookingOut])
+@router.get("/businesses/{business_id}/bookings", response_model=list[BookingListItem])
 async def list_bookings(
     business_id: int,
     booking_date: date | None = Query(None),
+    date_from: date | None = Query(None),
+    date_to: date | None = Query(None),
     status_filter: str | None = Query(None, alias="status"),
     staff_id: int | None = Query(None),
     limit: int = Query(200, ge=1, le=500),
@@ -185,6 +240,10 @@ async def list_bookings(
     filters = [Booking.business_id == business_id]
     if booking_date:
         filters.append(Booking.booking_date == booking_date)
+    if date_from:
+        filters.append(Booking.booking_date >= date_from)
+    if date_to:
+        filters.append(Booking.booking_date <= date_to)
     if status_filter:
         filters.append(Booking.status == status_filter)
     if staff_id:
@@ -197,7 +256,33 @@ async def list_bookings(
         .limit(limit)
         .offset(offset)
     )
-    return result.scalars().all()
+    bookings = result.scalars().all()
+
+    # Batch-resolve display names (no N+1)
+    svc_ids = {b.service_id for b in bookings}
+    stf_ids = {b.staff_id for b in bookings if b.staff_id}
+    svc_map: dict[int, Service] = {}
+    stf_map: dict[int, Staff] = {}
+    if svc_ids:
+        rows = await db.execute(select(Service).where(Service.id.in_(svc_ids)))
+        svc_map = {s.id: s for s in rows.scalars().all()}
+    if stf_ids:
+        rows = await db.execute(select(Staff).where(Staff.id.in_(stf_ids)))
+        stf_map = {s.id: s for s in rows.scalars().all()}
+
+    out: list[BookingListItem] = []
+    for b in bookings:
+        item = BookingListItem.model_validate(b)
+        svc = svc_map.get(b.service_id)
+        if svc:
+            item.service_name_uz = svc.name_uz
+            item.service_name_ru = svc.name_ru
+            item.service_name_en = svc.name_en
+        stf = stf_map.get(b.staff_id) if b.staff_id else None
+        if stf:
+            item.staff_name = stf.name
+        out.append(item)
+    return out
 
 
 @router.post("/businesses/{business_id}/bookings", response_model=BookingOut, status_code=201)
@@ -212,14 +297,31 @@ async def create_manual_booking(
     if not business or (business.owner_id != user.id and user.role != "super_admin"):
         raise HTTPException(status_code=403)
 
-    # Use a placeholder customer record for manual bookings
-    customer = Customer(
-        telegram_id=0,  # no telegram account
-        name=body.customer_name,
-        phone=body.customer_phone,
-    )
-    db.add(customer)
-    await db.flush()
+    # Walk-in customers have no Telegram account. Reuse an existing walk-in
+    # record with the same phone (so repeat customers keep their history)
+    # instead of inserting a duplicate each time.
+    customer = (
+        await db.execute(
+            select(Customer)
+            .where(
+                and_(
+                    Customer.telegram_id.is_(None),
+                    Customer.phone == body.customer_phone,
+                )
+            )
+            .limit(1)
+        )
+    ).scalar_one_or_none()
+    if customer is None:
+        customer = Customer(
+            telegram_id=None,  # walk-in: no Telegram account
+            name=body.customer_name,
+            phone=body.customer_phone,
+        )
+        db.add(customer)
+        await db.flush()
+    else:
+        customer.name = body.customer_name
 
     try:
         booking = await create_booking(
@@ -265,34 +367,49 @@ async def update_booking_status(
     if not is_owner and not is_assigned_staff and user.role != "super_admin":
         raise HTTPException(status_code=403)
 
+    was_pending = booking.status == "pending"
     booking.status = body.status
     db.add(booking)
     await db.commit()
     await db.refresh(booking)
 
+    customer = await db.get(Customer, booking.customer_id) if booking.customer_id else None
+    service = await db.get(Service, booking.service_id)
+    names = _svc_names(service)
+
+    # Tell the customer their pending request was approved
+    if body.status == "confirmed" and was_pending and customer and customer.telegram_id:
+        staff_row = await db.get(Staff, booking.staff_id) if booking.staff_id else None
+        await send_telegram_message(
+            customer.telegram_id,
+            booking_confirmed_message(
+                lang=customer.language,
+                business_name=business.name if business else "—",
+                service_name=names.get(customer.language, names["uz"]),
+                staff_name=staff_row.name if staff_row else "—",
+                date_str=str(booking.booking_date),
+                time_str=booking.start_time.strftime("%H:%M"),
+            ),
+        )
+
     # Send review prompt to customer when booking is completed
-    if body.status == "completed" and booking.customer_id:
-        customer = await db.get(Customer, booking.customer_id)
-        if customer and customer.telegram_id:
-            service = await db.get(Service, booking.service_id)
-            biz = await db.get(Business, booking.business_id)
-            svc_name = getattr(service, f"name_{customer.language}", service.name_uz) if service else "—"
-            stars_markup = {
-                "inline_keyboard": [[
-                    {"text": f"{'⭐' * i}", "callback_data": f"review_rate_{booking.id}_{i}"}
-                    for i in range(1, 6)
-                ]]
-            }
-            await send_telegram_message(
-                customer.telegram_id,
-                review_prompt_message(
-                    lang=customer.language,
-                    business_name=biz.name if biz else "—",
-                    service_name=svc_name,
-                    booking_id=booking.id,
-                ),
-                reply_markup=stars_markup,
-            )
+    if body.status == "completed" and customer and customer.telegram_id:
+        stars_markup = {
+            "inline_keyboard": [[
+                {"text": f"{'⭐' * i}", "callback_data": f"review_rate_{booking.id}_{i}"}
+                for i in range(1, 6)
+            ]]
+        }
+        await send_telegram_message(
+            customer.telegram_id,
+            review_prompt_message(
+                lang=customer.language,
+                business_name=business.name if business else "—",
+                service_name=names.get(customer.language, names["uz"]),
+                booking_id=booking.id,
+            ),
+            reply_markup=stars_markup,
+        )
 
     return booking
 
@@ -310,16 +427,23 @@ async def cancel_booking(
     if not booking:
         raise HTTPException(status_code=404)
 
+    if booking.status not in ("pending", "confirmed"):
+        raise HTTPException(status_code=409, detail="Booking is not active")
+
     # Determine who is cancelling
     business = await db.get(Business, booking.business_id)
     customer = await db.get(Customer, booking.customer_id) if booking.customer_id else None
     is_owner = business and business.owner_id == user.id
-    is_customer = customer and hasattr(user, "telegram_id") and customer.telegram_id == user.telegram_id
+    is_customer = (
+        customer
+        and customer.telegram_id is not None
+        and customer.telegram_id == user.telegram_id
+    )
 
     if not is_owner and not is_customer and user.role != "super_admin":
         raise HTTPException(status_code=403)
 
-    booking.status = "cancelled_by_business" if is_owner else "cancelled_by_customer"
+    booking.status = "cancelled_by_business" if (is_owner or user.role == "super_admin") and not is_customer else "cancelled_by_customer"
     booking.cancellation_reason = body.reason
     booking.cancelled_at = datetime.now(timezone.utc)
     db.add(booking)
@@ -327,17 +451,32 @@ async def cancel_booking(
     await db.refresh(booking)
 
     # Notify the other party
-    if is_owner and customer and customer.telegram_id:
-        service = await db.get(Service, booking.service_id)
+    if booking.status == "cancelled_by_business" and customer and customer.telegram_id:
         await send_telegram_message(
             customer.telegram_id,
             booking_cancelled_message(
                 lang=customer.language,
-                business_name=business.name,
+                business_name=business.name if business else "—",
                 date_str=str(booking.booking_date),
                 time_str=booking.start_time.strftime("%H:%M"),
             ),
         )
+    elif booking.status == "cancelled_by_customer":
+        owner = None
+        if business and business.owner_id:
+            owner = (
+                await db.execute(select(User).where(User.id == business.owner_id))
+            ).scalar_one_or_none()
+        if owner and owner.telegram_id:
+            await send_telegram_message(
+                owner.telegram_id,
+                booking_cancelled_message(
+                    lang=owner.language,
+                    business_name=booking.customer_name,
+                    date_str=str(booking.booking_date),
+                    time_str=booking.start_time.strftime("%H:%M"),
+                ),
+            )
 
     return booking
 
@@ -348,6 +487,7 @@ async def cancel_booking(
 async def get_customer_bookings(
     telegram_id: int,
     upcoming_only: bool = Query(False),
+    limit: int = Query(50, ge=1, le=100),
     user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ):
@@ -367,7 +507,12 @@ async def get_customer_bookings(
         filters.append(Booking.booking_date >= date_type.today())
         filters.append(Booking.status.in_(["pending", "confirmed"]))
 
+    order = (
+        (Booking.booking_date.asc(), Booking.start_time.asc())
+        if upcoming_only
+        else (Booking.booking_date.desc(), Booking.start_time.desc())
+    )
     result = await db.execute(
-        select(Booking).where(and_(*filters)).order_by(Booking.booking_date, Booking.start_time)
+        select(Booking).where(and_(*filters)).order_by(*order).limit(limit)
     )
     return result.scalars().all()

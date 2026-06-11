@@ -152,12 +152,31 @@ async def _get_breaks(
     return [Interval(b.start_time, b.end_time) for b in result.scalars().all()]
 
 
+def _as_local(dt: datetime) -> datetime:
+    """Normalize a stored datetime to business-local wall time.
+
+    timestamptz columns come back tz-aware (UTC) from Postgres — convert to
+    Asia/Tashkent. Naive values (SQLite in tests, legacy rows) are already
+    local wall time, so they pass through untouched.
+    """
+    from app.timeutils import PLATFORM_TZ
+
+    if dt.tzinfo is None:
+        return dt
+    return dt.astimezone(PLATFORM_TZ)
+
+
 async def _get_blocked_intervals(
     db: AsyncSession,
     staff: Staff,
     target_date: date,
 ) -> list[Interval]:
     """Returns all blocked time intervals for a staff member on a specific date."""
+    from app.timeutils import to_local
+
+    day_start = to_local(target_date, time(0, 0))
+    day_end = to_local(target_date, time(23, 59))
+
     stmt = select(BlockedTime).where(
         and_(
             or_(BlockedTime.staff_id == staff.id, BlockedTime.business_id == staff.business_id),
@@ -165,8 +184,8 @@ async def _get_blocked_intervals(
                 BlockedTime.blocked_date == target_date,
                 and_(
                     BlockedTime.start_datetime.isnot(None),
-                    BlockedTime.start_datetime <= datetime.combine(target_date, time(23, 59)),
-                    BlockedTime.end_datetime >= datetime.combine(target_date, time(0, 0)),
+                    BlockedTime.start_datetime <= day_end,
+                    BlockedTime.end_datetime >= day_start,
                 ),
             ),
         )
@@ -174,11 +193,16 @@ async def _get_blocked_intervals(
     result = await db.execute(stmt)
     intervals: list[Interval] = []
     for bt in result.scalars().all():
-        if bt.full_day or bt.blocked_date == target_date:
+        if bt.full_day or (bt.blocked_date == target_date and not bt.start_datetime):
             intervals.append(Interval(time(0, 0), time(23, 59)))
         elif bt.start_datetime and bt.end_datetime:
-            s = bt.start_datetime.time() if bt.start_datetime.date() == target_date else time(0, 0)
-            e = bt.end_datetime.time() if bt.end_datetime.date() == target_date else time(23, 59)
+            local_start = _as_local(bt.start_datetime)
+            local_end = _as_local(bt.end_datetime)
+            # Skip ranges that don't actually touch this day after tz conversion.
+            if local_end.date() < target_date or local_start.date() > target_date:
+                continue
+            s = local_start.time() if local_start.date() == target_date else time(0, 0)
+            e = local_end.time() if local_end.date() == target_date else time(23, 59)
             intervals.append(Interval(s, e))
     return intervals
 

@@ -17,6 +17,7 @@ import os
 os.environ.setdefault("DATABASE_URL", "postgresql+asyncpg://test:test@localhost:5432/test")
 os.environ.setdefault("SECRET_KEY", "test-secret-key-at-least-32-characters-long-000000")
 os.environ.setdefault("TELEGRAM_BOT_TOKEN", "123456:TEST-BOT-TOKEN-FOR-HMAC")
+os.environ.setdefault("TELEGRAM_BOT_USERNAME", "TestRezerv_bot")
 os.environ.setdefault("BOT_SECRET", "test-bot-secret-shared-32-characters-minimum-000")
 os.environ.setdefault("SUPER_ADMIN_TELEGRAM_IDS", "999000999")
 os.environ.setdefault("ALLOWED_ORIGINS", "http://localhost:5173")

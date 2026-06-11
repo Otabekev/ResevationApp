@@ -67,6 +67,22 @@ async def request_id_middleware(request: Request, call_next):
     return response
 
 
+@app.middleware("http")
+async def security_headers_middleware(request: Request, call_next):
+    """Defense-in-depth headers on every API response (the frontend proxy adds
+    its own, but the Railway API is also reachable directly)."""
+    response = await call_next(request)
+    response.headers.setdefault("X-Content-Type-Options", "nosniff")
+    response.headers.setdefault("X-Frame-Options", "DENY")
+    response.headers.setdefault("Referrer-Policy", "strict-origin-when-cross-origin")
+    response.headers.setdefault("Cache-Control", "no-store")
+    if settings.is_production:
+        response.headers.setdefault(
+            "Strict-Transport-Security", "max-age=31536000; includeSubDomains"
+        )
+    return response
+
+
 @app.exception_handler(Exception)
 async def unhandled_exception_handler(request: Request, exc: Exception):
     """Never leak stack traces / SQL to clients. Log full detail server-side."""
@@ -84,8 +100,8 @@ app.add_middleware(
     CORSMiddleware,
     allow_origins=settings.cors_origins,
     allow_credentials=True,
-    allow_methods=["*"],
-    allow_headers=["*"],
+    allow_methods=["GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"],
+    allow_headers=["Authorization", "Content-Type", "X-Request-ID", "X-Bot-Secret"],
 )
 
 # ── Routers ──────────────────────────────────────────────────────────────────

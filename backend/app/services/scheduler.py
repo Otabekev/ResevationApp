@@ -3,8 +3,15 @@ APScheduler-based reminder scheduler.
 Runs every 15 minutes and sends:
   - 24-hour reminders
   - 1-hour reminders
+
+Hardening notes:
+  - The candidate query is bounded to [today, today + 2 days] so the job never
+    scans the whole future bookings table.
+  - Each booking is processed inside its own try/except — one failed send
+    (Telegram hiccup, deleted customer) can never abort the whole sweep.
 """
-from datetime import date, datetime, time, timedelta, timezone
+import logging
+from datetime import datetime, timedelta, timezone
 
 from apscheduler.schedulers.asyncio import AsyncIOScheduler
 from sqlalchemy import and_, select
@@ -13,9 +20,10 @@ from app.database import AsyncSessionLocal
 from app.models.booking import Booking, Customer, Notification
 from app.models.business import Business
 from app.models.service import Service
-from app.models.staff import Staff
 from app.services.notification_service import booking_reminder_message, send_telegram_message
 from app.timeutils import to_utc
+
+logger = logging.getLogger("rezerv.scheduler")
 
 scheduler = AsyncIOScheduler(timezone="Asia/Tashkent")
 
@@ -34,68 +42,95 @@ async def _send_reminders() -> None:
 
             stmt = select(Booking).where(
                 and_(
-                    flag_col == False,
+                    flag_col == False,  # noqa: E712
                     Booking.status == "confirmed",
                     Booking.booking_date >= today,
+                    Booking.booking_date <= today + timedelta(days=2),
                 )
             )
             result = await db.execute(stmt)
             bookings = result.scalars().all()
 
             for booking in bookings:
-                # Booking times are stored in business-local time (Asia/Tashkent);
-                # convert to UTC before comparing against the UTC reminder window.
-                apt_datetime = to_utc(booking.booking_date, booking.start_time)
-                if not (window_start <= apt_datetime <= window_end):
-                    continue
+                try:
+                    # Booking times are stored in business-local time (Asia/Tashkent);
+                    # convert to UTC before comparing against the UTC reminder window.
+                    apt_datetime = to_utc(booking.booking_date, booking.start_time)
+                    if not (window_start <= apt_datetime <= window_end):
+                        continue
 
-                # Load related objects
-                cust_result = await db.execute(select(Customer).where(Customer.id == booking.customer_id))
-                customer = cust_result.scalar_one_or_none()
-                if not customer:
-                    continue
+                    customer = (
+                        await db.execute(
+                            select(Customer).where(Customer.id == booking.customer_id)
+                        )
+                    ).scalar_one_or_none()
+                    # Walk-in customers have no Telegram — skip but mark sent so
+                    # the row isn't rescanned forever.
+                    if not customer or not customer.telegram_id:
+                        setattr(booking, flag_name, True)
+                        continue
 
-                biz_result = await db.execute(select(Business).where(Business.id == booking.business_id))
-                business = biz_result.scalar_one_or_none()
+                    business = (
+                        await db.execute(
+                            select(Business).where(Business.id == booking.business_id)
+                        )
+                    ).scalar_one_or_none()
+                    service = (
+                        await db.execute(
+                            select(Service).where(Service.id == booking.service_id)
+                        )
+                    ).scalar_one_or_none()
+                    if not business or not service:
+                        setattr(booking, flag_name, True)
+                        continue
 
-                svc_result = await db.execute(select(Service).where(Service.id == booking.service_id))
-                service = svc_result.scalar_one_or_none()
+                    lang = customer.language
+                    svc_name = getattr(service, f"name_{lang}", service.name_uz)
+                    time_str = booking.start_time.strftime("%H:%M")
 
-                if not business or not service:
-                    continue
+                    text = booking_reminder_message(
+                        lang=lang,
+                        business_name=business.name,
+                        service_name=svc_name,
+                        time_str=time_str,
+                        hours_until=hours_until,
+                    )
 
-                lang = customer.language
-                svc_name = getattr(service, f"name_{lang}", service.name_uz)
-                time_str = booking.start_time.strftime("%H:%M")
+                    success = await send_telegram_message(customer.telegram_id, text)
 
-                text = booking_reminder_message(
-                    lang=lang,
-                    business_name=business.name,
-                    service_name=svc_name,
-                    time_str=time_str,
-                    hours_until=hours_until,
-                )
-
-                success = await send_telegram_message(customer.telegram_id, text)
-
-                # Log notification
-                notif = Notification(
-                    telegram_id=customer.telegram_id,
-                    notification_type=flag_name,
-                    booking_id=booking.id,
-                    message=text,
-                    status="sent" if success else "failed",
-                )
-                db.add(notif)
-
-                # Mark flag
-                setattr(booking, flag_name, True)
+                    db.add(
+                        Notification(
+                            telegram_id=customer.telegram_id,
+                            notification_type=flag_name,
+                            booking_id=booking.id,
+                            message=text,
+                            status="sent" if success else "failed",
+                        )
+                    )
+                    setattr(booking, flag_name, True)
+                except Exception:
+                    logger.exception("Reminder failed for booking %s", booking.id)
 
             await db.commit()
 
 
+async def _send_reminders_safe() -> None:
+    try:
+        await _send_reminders()
+    except Exception:
+        logger.exception("Reminder sweep failed")
+
+
 def start_scheduler() -> None:
-    scheduler.add_job(_send_reminders, "interval", minutes=15, id="reminders")
+    scheduler.add_job(
+        _send_reminders_safe,
+        "interval",
+        minutes=15,
+        id="reminders",
+        coalesce=True,        # collapse missed runs into one
+        max_instances=1,      # never overlap two sweeps
+        misfire_grace_time=300,
+    )
     scheduler.start()
 
 

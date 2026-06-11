@@ -10,11 +10,13 @@ from app.database import Base
 
 
 class Customer(Base):
-    """Telegram user who makes bookings. Separate from staff/owner users."""
+    """Person who makes bookings. Usually a Telegram user; walk-in customers
+    created manually by an owner have telegram_id = NULL (Postgres allows
+    multiple NULLs under the unique constraint)."""
     __tablename__ = "customers"
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True)
-    telegram_id: Mapped[int] = mapped_column(BigInteger, unique=True, nullable=False, index=True)
+    telegram_id: Mapped[int | None] = mapped_column(BigInteger, unique=True, nullable=True, index=True)
     name: Mapped[str] = mapped_column(String(255), nullable=False)
     phone: Mapped[str | None] = mapped_column(String(20), nullable=True)
     username: Mapped[str | None] = mapped_column(String(100), nullable=True)
