@@ -166,20 +166,8 @@ export default function Settings() {
             <label>{t("address")} *</label>
             <input required maxLength={500} value={form.address} onChange={(e) => set("address", e.target.value)} />
           </div>
-          <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(140px, 1fr))", gap: "var(--space-3)" }}>
-            <div className="form-group">
-              <label>{t("region")}</label>
-              <input maxLength={100} value={form.region} onChange={(e) => set("region", e.target.value)} />
-            </div>
-            <div className="form-group">
-              <label>{t("district")}</label>
-              <input maxLength={100} value={form.district} onChange={(e) => set("district", e.target.value)} />
-            </div>
-            <div className="form-group">
-              <label>{t("city")}</label>
-              <input maxLength={100} value={form.city} onChange={(e) => set("city", e.target.value)} />
-            </div>
-          </div>
+          {/* Region/district/city locked to Namangan / Pop for launch — kept in
+              form state (loaded from the business), just not shown here. */}
           <div className="form-group">
             <label>{t("instagram")}</label>
             <input maxLength={255} value={form.instagram_link} onChange={(e) => set("instagram_link", e.target.value)} placeholder="instagram.com/..." />

@@ -140,20 +140,9 @@ export default function BusinessSetup() {
                 placeholder={t("address_ph")}
               />
             </div>
-            <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(130px, 1fr))", gap: "var(--space-3)" }}>
-              <div className="form-group">
-                <label>{t("region")}</label>
-                <input maxLength={100} value={form.region} onChange={(e) => set("region", e.target.value)} />
-              </div>
-              <div className="form-group">
-                <label>{t("district")}</label>
-                <input maxLength={100} value={form.district} onChange={(e) => set("district", e.target.value)} />
-              </div>
-              <div className="form-group">
-                <label>{t("city")}</label>
-                <input maxLength={100} value={form.city} onChange={(e) => set("city", e.target.value)} />
-              </div>
-            </div>
+            {/* Region/district are locked to Namangan / Pop for the launch — held
+                in form state (see initial form), not shown. Re-expose when we
+                expand beyond Pop district. */}
             <LocationPicker
               latitude={form.latitude}
               longitude={form.longitude}
