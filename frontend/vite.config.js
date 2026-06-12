@@ -12,8 +12,8 @@ export default defineConfig({
       // link tag — so we don't ship a separate apple-touch-icon.png.
       includeAssets: ["favicon.ico", "icons/icon-192.png"],
       manifest: {
-        name: "Rezerv — Online Booking",
-        short_name: "Rezerv",
+        name: "Qulay Navbat — Online Booking",
+        short_name: "Qulay Navbat",
         description: "Online appointment booking for Uzbekistan businesses",
         theme_color: "#0C6E56",
         background_color: "#F7F5F1",

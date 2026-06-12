@@ -45,7 +45,7 @@ async def lifespan(app: FastAPI):
 
 
 app = FastAPI(
-    title="Rezerv API",
+    title="Qulay Navbat API",
     description="Universal appointment booking platform for Uzbekistan",
     version="1.0.0",
     lifespan=lifespan,

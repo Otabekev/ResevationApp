@@ -53,10 +53,10 @@ function BrandPanel({ t }) {
             fontWeight: 800, fontSize: 20,
           }}
         >
-          R
+          Q
         </span>
         <div>
-          <div style={{ fontWeight: 800, fontSize: 20, letterSpacing: "-0.02em" }}>Rezerv</div>
+          <div style={{ fontWeight: 800, fontSize: 20, letterSpacing: "-0.02em" }}>Qulay Navbat</div>
           <div style={{ fontSize: 10.5, fontWeight: 650, letterSpacing: ".14em", textTransform: "uppercase", color: "rgba(255,255,255,.5)" }}>
             {t("brand_tagline")}
           </div>
@@ -96,7 +96,7 @@ function BrandPanel({ t }) {
       </div>
 
       <div style={{ fontSize: 12.5, color: "rgba(255,255,255,.4)" }}>
-        © {new Date().getFullYear()} Rezerv · Namangan
+        © {new Date().getFullYear()} Qulay Navbat · Namangan
       </div>
     </div>
   );
@@ -226,9 +226,9 @@ export default function Login() {
                   boxShadow: "var(--shadow-md)",
                 }}
               >
-                R
+                Q
               </span>
-              <h1 style={{ fontSize: "var(--text-xl)", marginTop: 12 }}>Rezerv</h1>
+              <h1 style={{ fontSize: "var(--text-xl)", marginTop: 12 }}>Qulay Navbat</h1>
               <p style={{ color: "var(--gray-500)", fontSize: "var(--text-sm)", marginTop: 4, textAlign: "center" }}>
                 {t("login_hero_sub")}
               </p>

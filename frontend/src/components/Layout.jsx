@@ -33,14 +33,18 @@ const LANGS = [
 function LogoMark({ size = 34 }) {
   return (
     <span className="logo-mark" style={{ width: size, height: size }} aria-hidden>
-      <svg width={size * 0.56} height={size * 0.56} viewBox="0 0 24 24" fill="none">
-        {/* Rezerv mark: an "R" cut as a bookmark/calendar tab */}
-        <path
-          d="M6 3.5h8.2a4.3 4.3 0 0 1 1.6 8.3L19.5 17h-3.8l-3-4.4H9.5V17H6V3.5Zm3.5 3v3.2h4.3a1.6 1.6 0 1 0 0-3.2H9.5Z"
-          fill="#fff"
-        />
-        <path d="M6 17h3.5v3.5L7.75 19 6 20.5V17Z" fill="#fff" opacity=".75" />
-      </svg>
+      {/* Qulay Navbat mark: a "Q" with a calendar-tab tail */}
+      <span
+        style={{
+          fontWeight: 800,
+          fontSize: size * 0.52,
+          lineHeight: 1,
+          letterSpacing: "-0.03em",
+          color: "#fff",
+        }}
+      >
+        Q
+      </span>
     </span>
   );
 }
@@ -186,7 +190,7 @@ export default function Layout({ children }) {
         <div className="sidebar-logo">
           <LogoMark />
           <span className="logo-word">
-            Rezerv
+            Qulay Navbat
             <small>{t("brand_tagline")}</small>
           </span>
         </div>
@@ -206,7 +210,7 @@ export default function Layout({ children }) {
         </nav>
         <div className="sidebar-footer">
           <div style={{ fontSize: "var(--text-xs)", color: "rgba(255,255,255,.4)", padding: "0 6px" }}>
-            © {new Date().getFullYear()} Rezerv
+            © {new Date().getFullYear()} Qulay Navbat
           </div>
         </div>
       </aside>
@@ -229,7 +233,7 @@ export default function Layout({ children }) {
         {/* Mobile app bar */}
         <header className="appbar">
           <LogoMark size={30} />
-          <span className="appbar-title grow">{isAdmin ? t("platform_admin") : "Rezerv"}</span>
+          <span className="appbar-title grow">{isAdmin ? t("platform_admin") : "Qulay Navbat"}</span>
           <UserMenu />
         </header>
 

@@ -30,7 +30,7 @@ class Settings(BaseSettings):
     webhook_base_url: str = ""
 
     # Platform
-    platform_name: str = "Rezerv"
+    platform_name: str = "Qulay Navbat"
     super_admin_telegram_ids: str = ""  # comma-separated
 
     # CORS
