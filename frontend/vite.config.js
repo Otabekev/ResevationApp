@@ -7,7 +7,10 @@ export default defineConfig({
     react(),
     VitePWA({
       registerType: "autoUpdate",
-      includeAssets: ["favicon.ico", "apple-touch-icon.png"],
+      // Files copied verbatim into dist (referenced from index.html). The iOS
+      // home-screen icon points at /icons/icon-192.png — see the apple-touch-icon
+      // link tag — so we don't ship a separate apple-touch-icon.png.
+      includeAssets: ["favicon.ico", "icons/icon-192.png"],
       manifest: {
         name: "Rezerv — Online Booking",
         short_name: "Rezerv",

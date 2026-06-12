@@ -88,7 +88,7 @@ export default function AdminBusinesses() {
             onChange={(e) => setSearch(e.target.value)}
             placeholder={t("search_businesses")}
             aria-label={t("search_businesses")}
-            style={{ minHeight: 38, minWidth: 220, fontSize: "var(--text-sm)" }}
+            style={{ minHeight: 40, minWidth: 220 }}
           />
         </div>
 

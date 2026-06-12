@@ -99,7 +99,9 @@
 /* ── Reset & base ────────────────────────────────────────────────────────── */
 *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
 
-html { -webkit-text-size-adjust: 100%; }
+/* -webkit-tap-highlight-color: kill the grey flash iOS Safari paints on every
+   tapped link/button. text-size-adjust: stop iOS rotating-landscape text inflation. */
+html { -webkit-text-size-adjust: 100%; -webkit-tap-highlight-color: transparent; }
 
 html, body {
   height: 100%;
@@ -111,6 +113,8 @@ html, body {
   background: var(--bg);
   -webkit-font-smoothing: antialiased;
   text-rendering: optimizeLegibility;
+  /* Stop the whole page rubber-banding into white when scrolled past its edge. */
+  overscroll-behavior-y: none;
 }
 
 /* Warm paper: two barely-there brand washes + honey corner glow */
@@ -220,7 +224,10 @@ label { display: block; font-size: var(--text-sm); font-weight: 650; color: var(
 input, select, textarea {
   width: 100%; min-height: 44px; padding: 11px 13px;
   border: 1.5px solid var(--gray-300); border-radius: var(--radius-sm);
-  font-family: inherit; font-size: var(--text-base); color: var(--gray-800);
+  /* 16px is deliberate: iOS Safari auto-zooms into any field smaller than 16px
+     the moment it's focused, then leaves the page zoomed. Keeping the design's
+     15px here would make every tap on a field jolt the whole screen. */
+  font-family: inherit; font-size: 16px; color: var(--gray-800);
   background: var(--surface); outline: none;
   transition: border-color var(--dur-fast) var(--ease), box-shadow var(--dur-fast) var(--ease);
 }
