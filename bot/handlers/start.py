@@ -1,3 +1,5 @@
+import logging
+
 from aiogram import F, Router
 from aiogram.filters import CommandStart
 from aiogram.fsm.context import FSMContext
@@ -11,6 +13,7 @@ from aiogram.types import (
 import api_client
 from i18n import t
 
+logger = logging.getLogger(__name__)
 router = Router()
 
 
@@ -134,7 +137,8 @@ async def confirm_web_login(callback: CallbackQuery, state: FSMContext) -> None:
     try:
         await api_client.complete_web_login(nonce, u.id, u.full_name, u.username, lang)
         await callback.message.edit_text(t("web_login_done", lang))
-    except Exception:
+    except Exception as exc:
+        logger.exception("web-login failed for tg=%s nonce=%s: %s", u.id, nonce, exc)
         await callback.message.edit_text(t("web_login_failed", lang))
     await callback.answer()
 
