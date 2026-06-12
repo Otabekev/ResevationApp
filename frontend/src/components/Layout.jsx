@@ -18,6 +18,12 @@ const NAV_ITEMS = [
   { path: "/settings", Icon: IconSettings, key: "settings", mobile: true },
 ];
 
+// Super-admin lives in its own world: no business switcher, no owner pages.
+const ADMIN_NAV_ITEMS = [
+  { path: "/", Icon: IconHome, key: "overview", mobile: true },
+  { path: "/admin/businesses", Icon: IconShield, key: "businesses", mobile: true },
+];
+
 const LANGS = [
   { code: "uz", label: "O‘zbekcha" },
   { code: "ru", label: "Русский" },
@@ -170,9 +176,8 @@ export default function Layout({ children }) {
   const { user, lang } = useStore();
   const t = useT(lang);
 
-  const allNav = user?.role === "super_admin"
-    ? [...NAV_ITEMS, { path: "/admin", Icon: IconShield, key: "admin", mobile: false }]
-    : NAV_ITEMS;
+  const isAdmin = user?.role === "super_admin";
+  const allNav = isAdmin ? ADMIN_NAV_ITEMS : NAV_ITEMS;
 
   return (
     <div className="layout">
@@ -209,7 +214,14 @@ export default function Layout({ children }) {
       <div className="content-col">
         {/* Desktop topbar */}
         <header className="topbar">
-          <BusinessSwitcher />
+          {isAdmin ? (
+            <span className="biz-switcher" style={{ cursor: "default" }}>
+              <IconShield size={15} style={{ color: "var(--brand-600)" }} />
+              <span className="biz-name">{t("platform_admin")}</span>
+            </span>
+          ) : (
+            <BusinessSwitcher />
+          )}
           <div className="topbar-spacer" />
           <UserMenu />
         </header>
@@ -217,7 +229,7 @@ export default function Layout({ children }) {
         {/* Mobile app bar */}
         <header className="appbar">
           <LogoMark size={30} />
-          <span className="appbar-title grow">Rezerv</span>
+          <span className="appbar-title grow">{isAdmin ? t("platform_admin") : "Rezerv"}</span>
           <UserMenu />
         </header>
 

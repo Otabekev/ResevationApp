@@ -1,12 +1,16 @@
+from datetime import date, datetime
+
 from fastapi import APIRouter, Depends, HTTPException, Query
 from pydantic import BaseModel
-from sqlalchemy import func, select
+from sqlalchemy import desc, func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.database import get_db
 from app.deps import get_current_super_admin
 from app.models.booking import Booking, Customer
 from app.models.business import Business, BusinessCategory
+from app.models.service import Service
+from app.models.staff import Staff
 from app.models.user import User
 
 router = APIRouter(prefix="/admin", tags=["admin"])
@@ -186,3 +190,150 @@ async def list_users(
     stmt = stmt.offset((page - 1) * 20).limit(20)
     result = await db.execute(stmt)
     return result.scalars().all()
+
+
+# ── Drill-down + activity feed for the admin overview ────────────────────────
+
+def _booking_row(b: Booking, business_name: str | None, service_name: str | None) -> dict:
+    """Compact booking row for admin feeds — names included so the client
+    doesn't N+1 fetch."""
+    return {
+        "id": b.id,
+        "business_id": b.business_id,
+        "business_name": business_name,
+        "service_name": service_name,
+        "customer_name": b.customer_name,
+        "booking_date": b.booking_date.isoformat() if b.booking_date else None,
+        "booking_time": b.booking_time.isoformat() if b.booking_time else None,
+        "status": b.status,
+        "created_at": b.created_at.isoformat() if b.created_at else None,
+    }
+
+
+@router.get("/businesses/{business_id}/detail")
+async def get_business_detail(
+    business_id: int,
+    _: User = Depends(get_current_super_admin),
+    db: AsyncSession = Depends(get_db),
+):
+    """Admin drill-down: business fields + owner + counts + recent bookings."""
+    business = await db.get(Business, business_id)
+    if not business:
+        raise HTTPException(status_code=404)
+
+    owner = await db.get(User, business.owner_id) if business.owner_id else None
+
+    services_count = await db.scalar(
+        select(func.count(Service.id)).where(Service.business_id == business_id)
+    ) or 0
+    staff_count = await db.scalar(
+        select(func.count(Staff.id)).where(Staff.business_id == business_id)
+    ) or 0
+    bookings_total = await db.scalar(
+        select(func.count(Booking.id)).where(Booking.business_id == business_id)
+    ) or 0
+    bookings_today = await db.scalar(
+        select(func.count(Booking.id)).where(
+            Booking.business_id == business_id,
+            Booking.booking_date == date.today(),
+        )
+    ) or 0
+    bookings_month = await db.scalar(
+        select(func.count(Booking.id)).where(
+            Booking.business_id == business_id,
+            Booking.booking_date >= date.today().replace(day=1),
+        )
+    ) or 0
+    bookings_confirmed = await db.scalar(
+        select(func.count(Booking.id)).where(
+            Booking.business_id == business_id,
+            Booking.status.in_(["confirmed", "completed"]),
+        )
+    ) or 0
+
+    # Recent 10 bookings with service name joined (no client N+1).
+    rows = await db.execute(
+        select(Booking, Service.name_uz)
+        .join(Service, Service.id == Booking.service_id, isouter=True)
+        .where(Booking.business_id == business_id)
+        .order_by(desc(Booking.created_at))
+        .limit(10)
+    )
+    recent = [_booking_row(b, business.name, svc_name) for b, svc_name in rows.all()]
+
+    return {
+        "id": business.id,
+        "name": business.name,
+        "category_id": business.category_id,
+        "status": business.status,
+        "region": business.region,
+        "district": business.district,
+        "address": business.address,
+        "phone": business.phone,
+        "is_online_booking_enabled": business.is_online_booking_enabled,
+        "trial_ends_at": business.trial_ends_at.isoformat() if business.trial_ends_at else None,
+        "created_at": business.created_at.isoformat() if business.created_at else None,
+        "owner": {
+            "id": owner.id,
+            "name": owner.name,
+            "username": owner.username,
+            "telegram_id": owner.telegram_id,
+            "role": owner.role,
+        } if owner else None,
+        "counts": {
+            "services": services_count,
+            "staff": staff_count,
+            "bookings_total": bookings_total,
+            "bookings_today": bookings_today,
+            "bookings_month": bookings_month,
+            "bookings_confirmed": bookings_confirmed,
+        },
+        "recent_bookings": recent,
+    }
+
+
+@router.get("/recent")
+async def get_recent_activity(
+    _: User = Depends(get_current_super_admin),
+    db: AsyncSession = Depends(get_db),
+):
+    """Drives the overview page: who's waiting for approval, who signed up
+    recently, and what bookings are flowing through the platform."""
+    pending_rows = await db.execute(
+        select(Business).where(Business.status == "pending").order_by(desc(Business.created_at)).limit(20)
+    )
+    pending = [
+        {
+            "id": b.id, "name": b.name, "district": b.district,
+            "region": b.region, "status": b.status,
+            "created_at": b.created_at.isoformat() if b.created_at else None,
+        }
+        for b in pending_rows.scalars().all()
+    ]
+
+    recent_biz_rows = await db.execute(
+        select(Business).order_by(desc(Business.created_at)).limit(5)
+    )
+    recent_businesses = [
+        {
+            "id": b.id, "name": b.name, "district": b.district,
+            "status": b.status,
+            "created_at": b.created_at.isoformat() if b.created_at else None,
+        }
+        for b in recent_biz_rows.scalars().all()
+    ]
+
+    booking_rows = await db.execute(
+        select(Booking, Business.name, Service.name_uz)
+        .join(Business, Business.id == Booking.business_id, isouter=True)
+        .join(Service, Service.id == Booking.service_id, isouter=True)
+        .order_by(desc(Booking.created_at))
+        .limit(10)
+    )
+    recent_bookings = [_booking_row(b, biz_name, svc_name) for b, biz_name, svc_name in booking_rows.all()]
+
+    return {
+        "pending": pending,
+        "recent_businesses": recent_businesses,
+        "recent_bookings": recent_bookings,
+    }

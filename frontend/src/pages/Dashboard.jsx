@@ -105,6 +105,31 @@ export default function Dashboard() {
     );
   }
 
+  // Business submitted but admin hasn't approved it yet — customers can't
+  // book here, so the normal dashboard would be empty + confusing. Show the
+  // waiting-for-approval screen instead.
+  if (activeBusiness?.status === "pending") {
+    return (
+      <div className="animate-in">
+        <div className="page-header">
+          <div>
+            <div className="eyebrow" style={{ display: "flex", alignItems: "center", gap: 6 }}>
+              <IconClock size={13} /> {t("status_pending")}
+            </div>
+            <h1 className="page-title" style={{ marginTop: 4 }}>{activeBusiness.name}</h1>
+          </div>
+        </div>
+        <div className="card" style={{ borderLeft: "3px solid var(--warning)" }}>
+          <EmptyState
+            icon={<IconClock size={26} />}
+            title={t("awaiting_approval_title")}
+            subtitle={t("awaiting_approval_desc")}
+          />
+        </div>
+      </div>
+    );
+  }
+
   const firstName = (user?.name || "").split(" ")[0];
   const upcoming = todayBookings.filter((b) => ["pending", "confirmed"].includes(b.status));
   const svcName = (b) => b[`service_name_${lang}`] || b.service_name_uz || `#${b.service_id}`;

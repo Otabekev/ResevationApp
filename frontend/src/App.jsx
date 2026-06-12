@@ -11,7 +11,9 @@ import Schedule from "./pages/Schedule";
 import Analytics from "./pages/Analytics";
 import BusinessSetup from "./pages/BusinessSetup";
 import Settings from "./pages/Settings";
-import AdminPanel from "./pages/AdminPanel";
+import AdminOverview from "./pages/AdminOverview";
+import AdminBusinesses from "./pages/AdminBusinesses";
+import AdminBusinessDetail from "./pages/AdminBusinessDetail";
 import Login from "./pages/Login";
 
 export default function App() {
@@ -29,16 +31,19 @@ export default function App() {
           const me = await getMe();
           setAuth(me, localStorage.getItem("access_token"));
 
-          // Load the owner's businesses once, centrally — the topbar switcher
-          // and every page read them from the store.
-          const bizList = await getMyBusinesses().catch(() => []);
-          setBusinesses(bizList);
-          const stillValid = activeBusiness && bizList.some((b) => b.id === activeBusiness.id);
-          if (stillValid) {
-            // refresh the stored copy with current data
-            setActiveBusiness(bizList.find((b) => b.id === activeBusiness.id));
+          // Super_admins don't own businesses — skip the owner-side hydration.
+          if (me.role !== "super_admin") {
+            const bizList = await getMyBusinesses().catch(() => []);
+            setBusinesses(bizList);
+            const stillValid = activeBusiness && bizList.some((b) => b.id === activeBusiness.id);
+            if (stillValid) {
+              setActiveBusiness(bizList.find((b) => b.id === activeBusiness.id));
+            } else {
+              setActiveBusiness(bizList[0] || null);
+            }
           } else {
-            setActiveBusiness(bizList[0] || null);
+            setBusinesses([]);
+            setActiveBusiness(null);
           }
         }
       } catch {
@@ -69,21 +74,33 @@ export default function App() {
     );
   }
 
+  const isAdmin = user?.role === "super_admin";
+
   return (
     <BrowserRouter>
       <Layout>
-        <Routes>
-          <Route path="/" element={<Dashboard />} />
-          <Route path="/bookings" element={<Bookings />} />
-          <Route path="/services" element={<Services />} />
-          <Route path="/staff" element={<Staff />} />
-          <Route path="/schedule" element={<Schedule />} />
-          <Route path="/analytics" element={<Analytics />} />
-          <Route path="/setup" element={<BusinessSetup />} />
-          <Route path="/settings" element={<Settings />} />
-          {user?.role === "super_admin" && <Route path="/admin" element={<AdminPanel />} />}
-          <Route path="*" element={<Navigate to="/" replace />} />
-        </Routes>
+        {isAdmin ? (
+          // Super_admin world: only platform-management routes. Owner pages
+          // would render empty (no business), so we hide them entirely.
+          <Routes>
+            <Route path="/" element={<AdminOverview />} />
+            <Route path="/admin/businesses" element={<AdminBusinesses />} />
+            <Route path="/admin/businesses/:id" element={<AdminBusinessDetail />} />
+            <Route path="*" element={<Navigate to="/" replace />} />
+          </Routes>
+        ) : (
+          <Routes>
+            <Route path="/" element={<Dashboard />} />
+            <Route path="/bookings" element={<Bookings />} />
+            <Route path="/services" element={<Services />} />
+            <Route path="/staff" element={<Staff />} />
+            <Route path="/schedule" element={<Schedule />} />
+            <Route path="/analytics" element={<Analytics />} />
+            <Route path="/setup" element={<BusinessSetup />} />
+            <Route path="/settings" element={<Settings />} />
+            <Route path="*" element={<Navigate to="/" replace />} />
+          </Routes>
+        )}
       </Layout>
     </BrowserRouter>
   );

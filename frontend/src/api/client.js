@@ -161,3 +161,6 @@ export const getAdminBusinesses = (params) =>
   api.get("/admin/businesses", { params }).then((r) => r.data);
 export const updateBusinessStatus = (bizId, status) =>
   api.patch(`/admin/businesses/${bizId}/status`, { status }).then((r) => r.data);
+export const getAdminBusinessDetail = (bizId) =>
+  api.get(`/admin/businesses/${bizId}/detail`).then((r) => r.data);
+export const getAdminRecent = () => api.get("/admin/recent").then((r) => r.data);

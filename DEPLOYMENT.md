@@ -178,4 +178,10 @@ cd bot
 pip install -r requirements.txt
 python main.py
 
-# 4. Fronten
+# 4. Frontend (separate terminal)
+cd frontend
+npm install
+npm run dev
+```
+
+Access the app at `http://localhost:5173`

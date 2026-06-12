@@ -120,10 +120,12 @@ async def register_business(
         user.role = "business_owner"
         db.add(user)
 
+    # New businesses are 'pending' — invisible to customers until a super_admin
+    # approves them. Promotion to 'active' (or 'trial') happens in /admin.
     business = Business(
         owner_id=user.id,
         **body.model_dump(),
-        status="trial",
+        status="pending",
         trial_ends_at=datetime.now(timezone.utc) + timedelta(days=14),
     )
     db.add(business)
