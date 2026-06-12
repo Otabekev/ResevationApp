@@ -69,24 +69,22 @@ async def cmd_start(message: Message, state: FSMContext) -> None:
         await _handle_join(message, state, start_param[5:])
         return
     if start_param.startswith("book_"):
-        # book_{business_id} — direct booking link (Instagram bio, share button)
+        # book_{business_id} — direct booking link (Instagram bio, share button).
+        # Remember the business, then ask language first; after the user picks,
+        # set_language opens this business's booking card.
         raw_id = start_param[5:]
-        if not raw_id.isdigit():
-            await message.answer(t("start", lang), parse_mode="HTML", reply_markup=main_menu_keyboard(lang))
-            return
-        try:
-            biz = await api_client.get_public_business(int(raw_id))
-            await state.update_data(business_id=int(raw_id), business_name=biz.get("name", "—"))
-            await message.answer(
-                f"🏪 <b>{biz.get('name', '')}</b>\n📍 {biz.get('address', '')}",
-                parse_mode="HTML",
-                reply_markup=InlineKeyboardMarkup(inline_keyboard=[
-                    [InlineKeyboardButton(text=t("book_appointment", lang), callback_data=f"biz_{raw_id}")],
-                    [InlineKeyboardButton(text=t("back", lang), callback_data="main_menu")],
-                ])
-            )
-        except Exception:
-            await message.answer(t("server_error", lang), reply_markup=main_menu_keyboard(lang))
+        if raw_id.isdigit():
+            try:
+                biz = await api_client.get_public_business(int(raw_id))
+                await state.update_data(
+                    business_id=int(raw_id),
+                    business_name=biz.get("name", "—"),
+                    business_address=biz.get("address", ""),
+                    pending_action="book",
+                )
+            except Exception:
+                pass  # fall through to a plain language pick → main menu
+        await message.answer(t("choose_language", lang), reply_markup=language_keyboard())
         return
     if start_param.startswith("login_"):
         # login_{nonce} — web dashboard login. Ask the user to confirm so a
@@ -100,11 +98,9 @@ async def cmd_start(message: Message, state: FSMContext) -> None:
         )
         return
 
-    await message.answer(
-        t("start", lang),
-        parse_mode="HTML",
-        reply_markup=main_menu_keyboard(lang),
-    )
+    # Every /start asks for language first — older users often share a device
+    # and expect to pick their language each time. set_language then routes on.
+    await message.answer(t("choose_language", lang), reply_markup=language_keyboard())
 
 
 async def _handle_join(message: Message, state: FSMContext, token: str) -> None:
@@ -170,10 +166,25 @@ async def set_language(callback: CallbackQuery, state: FSMContext) -> None:
         except Exception:
             pass  # cosmetic — the FSM language is already updated
 
-    await callback.message.edit_text(
-        t("lang_selected", new_lang),
-        reply_markup=main_menu_keyboard(new_lang),
-    )
+    # If the user arrived via a booking deep-link, continue to that business's
+    # card; otherwise drop them on the main menu.
+    if data.get("pending_action") == "book" and data.get("business_id"):
+        await state.update_data(pending_action=None)
+        biz_id = data["business_id"]
+        await callback.message.edit_text(
+            f"🏪 <b>{data.get('business_name', '')}</b>\n📍 {data.get('business_address', '')}",
+            parse_mode="HTML",
+            reply_markup=InlineKeyboardMarkup(inline_keyboard=[
+                [InlineKeyboardButton(text=t("book_appointment", new_lang), callback_data=f"biz_{biz_id}")],
+                [InlineKeyboardButton(text=t("back", new_lang), callback_data="main_menu")],
+            ]),
+        )
+    else:
+        await callback.message.edit_text(
+            t("start", new_lang),
+            parse_mode="HTML",
+            reply_markup=main_menu_keyboard(new_lang),
+        )
     await callback.answer()
 
 
