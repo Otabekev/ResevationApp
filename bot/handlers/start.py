@@ -80,6 +80,7 @@ async def cmd_start(message: Message, state: FSMContext) -> None:
                     business_id=int(raw_id),
                     business_name=biz.get("name", "—"),
                     business_address=biz.get("address", ""),
+                    business_has_location=biz.get("latitude") is not None and biz.get("longitude") is not None,
                     pending_action="book",
                 )
             except Exception:
@@ -171,13 +172,14 @@ async def set_language(callback: CallbackQuery, state: FSMContext) -> None:
     if data.get("pending_action") == "book" and data.get("business_id"):
         await state.update_data(pending_action=None)
         biz_id = data["business_id"]
+        rows = [[InlineKeyboardButton(text=t("book_appointment", new_lang), callback_data=f"biz_{biz_id}")]]
+        if data.get("business_has_location"):
+            rows.append([InlineKeyboardButton(text=t("view_location", new_lang), callback_data=f"loc_{biz_id}")])
+        rows.append([InlineKeyboardButton(text=t("back", new_lang), callback_data="main_menu")])
         await callback.message.edit_text(
             f"🏪 <b>{data.get('business_name', '')}</b>\n📍 {data.get('business_address', '')}",
             parse_mode="HTML",
-            reply_markup=InlineKeyboardMarkup(inline_keyboard=[
-                [InlineKeyboardButton(text=t("book_appointment", new_lang), callback_data=f"biz_{biz_id}")],
-                [InlineKeyboardButton(text=t("back", new_lang), callback_data="main_menu")],
-            ]),
+            reply_markup=InlineKeyboardMarkup(inline_keyboard=rows),
         )
     else:
         await callback.message.edit_text(
@@ -197,4 +199,33 @@ async def back_to_main(callback: CallbackQuery, state: FSMContext) -> None:
         parse_mode="HTML",
         reply_markup=main_menu_keyboard(lang),
     )
+    await callback.answer()
+
+
+@router.callback_query(F.data.startswith("loc_"))
+async def send_business_location(callback: CallbackQuery, state: FSMContext) -> None:
+    """Send the business location as a native Telegram pin — tap it for
+    directions. Reachable from the business card and from a saved reservation,
+    so older customers always have a one-tap way to find the place."""
+    data = await state.get_data()
+    lang = data.get("lang", "uz")
+    try:
+        biz_id = int(callback.data.split("_", 1)[1])
+    except (ValueError, IndexError):
+        await callback.answer()
+        return
+    try:
+        biz = await api_client.get_public_business(biz_id)
+        lat, lng = biz.get("latitude"), biz.get("longitude")
+        if lat is None or lng is None:
+            await callback.answer(t("no_location", lang), show_alert=True)
+            return
+        await callback.message.answer_location(latitude=lat, longitude=lng)
+        await callback.message.answer(
+            f"🏪 <b>{biz.get('name', '')}</b>\n📍 {biz.get('address', '')}",
+            parse_mode="HTML",
+        )
+    except Exception:
+        await callback.answer(t("server_error", lang), show_alert=True)
+        return
     await callback.answer()

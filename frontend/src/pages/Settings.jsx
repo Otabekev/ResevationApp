@@ -8,6 +8,7 @@ import Toast from "../components/Toast";
 import {
   IconStore, IconLink, IconCopy, IconCheck, IconSettings, IconSend, IconTelegram,
 } from "../components/icons";
+import LocationPicker from "../components/LocationPicker";
 
 const BOT_USERNAME = import.meta.env.VITE_TELEGRAM_BOT_USERNAME || "QulayNavbat_bot";
 
@@ -29,6 +30,8 @@ export default function Settings() {
           city: biz.city || "",
           region: biz.region || "",
           district: biz.district || "",
+          latitude: biz.latitude ?? null,
+          longitude: biz.longitude ?? null,
           telegram_username: biz.telegram_username || "",
           instagram_link: biz.instagram_link || "",
           description: biz.description || "",
@@ -181,10 +184,15 @@ export default function Settings() {
             <label>{t("instagram")}</label>
             <input maxLength={255} value={form.instagram_link} onChange={(e) => set("instagram_link", e.target.value)} placeholder="instagram.com/..." />
           </div>
-          <div className="form-group" style={{ marginBottom: 0 }}>
+          <div className="form-group">
             <label>{t("description")}</label>
             <textarea rows={3} maxLength={2000} value={form.description} onChange={(e) => set("description", e.target.value)} />
           </div>
+          <LocationPicker
+            latitude={form.latitude}
+            longitude={form.longitude}
+            onChange={(lat, lng) => setForm((f) => ({ ...f, latitude: lat, longitude: lng }))}
+          />
         </div>
 
         {/* Booking rules */}

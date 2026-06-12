@@ -196,6 +196,13 @@ export const IconNote = (p) => (
   </Icon>
 );
 
+export const IconMapPin = (p) => (
+  <Icon {...p}>
+    <path d="M12 21s7-5.5 7-11a7 7 0 1 0-14 0c0 5.5 7 11 7 11Z" />
+    <circle cx="12" cy="10" r="2.6" />
+  </Icon>
+);
+
 export const IconAlert = (p) => (
   <Icon {...p}>
     <path d="M12 4 2.8 19.5h18.4L12 4Z" />

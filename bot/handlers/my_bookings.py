@@ -55,13 +55,19 @@ async def my_bookings(callback: CallbackQuery, state: FSMContext) -> None:
     rows = []
     for b in bookings[:10]:
         text += format_booking(b, lang) + "\n\n"
+        btn_row = []
+        if b.get("business_id"):
+            btn_row.append(InlineKeyboardButton(
+                text=t("view_location", lang),
+                callback_data=f"loc_{b['business_id']}",
+            ))
         if b.get("status") in ("pending", "confirmed"):
-            rows.append([
-                InlineKeyboardButton(
-                    text=t("cancel_n", lang, id=b["id"]),
-                    callback_data=f"cancel_booking_{b['id']}",
-                )
-            ])
+            btn_row.append(InlineKeyboardButton(
+                text=t("cancel_n", lang, id=b["id"]),
+                callback_data=f"cancel_booking_{b['id']}",
+            ))
+        if btn_row:
+            rows.append(btn_row)
 
     rows.append([InlineKeyboardButton(text=t("back", lang), callback_data="main_menu")])
 

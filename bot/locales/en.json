@@ -6,6 +6,8 @@
   "book_appointment": "Book Appointment 📅",
   "help": "Help ❓",
   "settings": "Settings ⚙️",
+  "view_location": "📍 View location",
+  "no_location": "This business hasn't set a location yet.",
   "back": "⬅️ Back",
   "cancel": "❌ Cancel",
   "confirm": "✅ Confirm",

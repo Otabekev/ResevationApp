@@ -261,6 +261,19 @@ const translations = {
     username: "Foydalanuvchi nomi",
     created_at: "Yaratilgan",
 
+    // Location
+    business_location: "Biznes manzili (xaritada)",
+    location_hint: "Mijozlar lokatsiyani bir tegish bilan ochadi va yo'l oladi. Do'koningizda turib \"Joriy lokatsiya\"ni bosing.",
+    use_my_location: "Joriy lokatsiyadan olish",
+    locating: "Aniqlanmoqda...",
+    remove_location: "O'chirish",
+    location_set: "Lokatsiya saqlandi",
+    location_paste_ph: "Google Maps havolasi yoki koordinatalar",
+    location_invalid: "Koordinatalarni o'qib bo'lmadi",
+    geo_unavailable: "Brauzer lokatsiyani qo'llab-quvvatlamaydi",
+    geo_denied: "Lokatsiyaga ruxsat berilmadi",
+    apply: "Qo'llash",
+
     // Auth / login
     sign_in: "Kirish",
     login_for_owners: "Biznes egalari uchun",
@@ -535,6 +548,19 @@ const translations = {
     username: "Имя пользователя",
     created_at: "Создан",
 
+    // Location
+    business_location: "Адрес на карте",
+    location_hint: "Клиенты откроют локацию одним касанием и построят маршрут. Находясь в заведении, нажмите «Текущая локация».",
+    use_my_location: "Взять текущую локацию",
+    locating: "Определяем...",
+    remove_location: "Удалить",
+    location_set: "Локация сохранена",
+    location_paste_ph: "Ссылка Google Maps или координаты",
+    location_invalid: "Не удалось распознать координаты",
+    geo_unavailable: "Браузер не поддерживает геолокацию",
+    geo_denied: "Доступ к локации запрещён",
+    apply: "Применить",
+
     sign_in: "Вход",
     login_for_owners: "Для владельцев бизнеса",
     login_hero_title: "Система онлайн-записи для вашего бизнеса",
@@ -804,6 +830,19 @@ const translations = {
     no_owner: "No owner",
     username: "Username",
     created_at: "Created",
+
+    // Location
+    business_location: "Location on map",
+    location_hint: "Customers open it with one tap and get directions. Standing in your shop, tap \"Use current location\".",
+    use_my_location: "Use current location",
+    locating: "Locating...",
+    remove_location: "Remove",
+    location_set: "Location saved",
+    location_paste_ph: "Google Maps link or coordinates",
+    location_invalid: "Couldn't read those coordinates",
+    geo_unavailable: "Your browser doesn't support location",
+    geo_denied: "Location permission denied",
+    apply: "Apply",
 
     sign_in: "Sign in",
     login_for_owners: "For business owners",

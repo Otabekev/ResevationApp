@@ -6,6 +6,8 @@
   "book_appointment": "Bron qilish 📅",
   "help": "Yordam ❓",
   "settings": "Sozlamalar ⚙️",
+  "view_location": "📍 Manzilni ko'rish",
+  "no_location": "Bu biznes hali manzilni belgilamagan.",
   "back": "⬅️ Orqaga",
   "cancel": "❌ Bekor qilish",
   "confirm": "✅ Tasdiqlash",

@@ -4,6 +4,7 @@ import useStore from "../store/useStore";
 import { useNavigate } from "react-router-dom";
 import { useT } from "../i18n";
 import { IconArrowLeft, IconCheck, IconStore } from "../components/icons";
+import LocationPicker from "../components/LocationPicker";
 
 const STEPS = 3;
 
@@ -20,6 +21,8 @@ export default function BusinessSetup() {
     district: "Pop",
     city: "Pop",
     address: "",
+    latitude: null,
+    longitude: null,
     phone: "",
     telegram_username: "",
     instagram_link: "",
@@ -151,6 +154,11 @@ export default function BusinessSetup() {
                 <input maxLength={100} value={form.city} onChange={(e) => set("city", e.target.value)} />
               </div>
             </div>
+            <LocationPicker
+              latitude={form.latitude}
+              longitude={form.longitude}
+              onChange={(lat, lng) => setForm((f) => ({ ...f, latitude: lat, longitude: lng }))}
+            />
           </>
         )}
 
