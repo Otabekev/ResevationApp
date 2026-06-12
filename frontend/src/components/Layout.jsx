@@ -3,6 +3,7 @@ import { NavLink, useNavigate } from "react-router-dom";
 import useStore from "../store/useStore";
 import { useT } from "../i18n";
 import { updateMyLanguage } from "../api/client";
+import BrandMark from "./BrandMark";
 import {
   IconHome, IconCalendar, IconScissors, IconUsers, IconClock, IconChart,
   IconSettings, IconShield, IconChevronDown, IconLogout, IconGlobe, IconCheck,
@@ -33,18 +34,7 @@ const LANGS = [
 function LogoMark({ size = 34 }) {
   return (
     <span className="logo-mark" style={{ width: size, height: size }} aria-hidden>
-      {/* Qulay Navbat mark: a "Q" with a calendar-tab tail */}
-      <span
-        style={{
-          fontWeight: 800,
-          fontSize: size * 0.52,
-          lineHeight: 1,
-          letterSpacing: "-0.03em",
-          color: "#fff",
-        }}
-      >
-        Q
-      </span>
+      <BrandMark size={size * 0.62} />
     </span>
   );
 }

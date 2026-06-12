@@ -4,6 +4,7 @@ import { pollWebLogin, getMe } from "../api/client";
 import useStore from "../store/useStore";
 import { useT } from "../i18n";
 import { IconCalendar, IconUsers, IconChart, IconCheck, IconTelegram, IconGlobe } from "../components/icons";
+import BrandMark from "../components/BrandMark";
 
 const IS_DEV = import.meta.env.DEV || import.meta.env.VITE_DEV_BYPASS_TELEGRAM === "true";
 const BOT_USERNAME = import.meta.env.VITE_TELEGRAM_BOT_USERNAME || "QulayNavbat_bot";
@@ -50,10 +51,9 @@ function BrandPanel({ t }) {
             background: "linear-gradient(150deg, var(--brand-400), var(--brand-600))",
             display: "inline-flex", alignItems: "center", justifyContent: "center",
             boxShadow: "0 4px 12px rgba(0,0,0,.3), inset 0 1px 0 rgba(255,255,255,.25)",
-            fontWeight: 800, fontSize: 20,
           }}
         >
-          Q
+          <BrandMark size={24} />
         </span>
         <div>
           <div style={{ fontWeight: 800, fontSize: 20, letterSpacing: "-0.02em" }}>Qulay Navbat</div>
@@ -222,11 +222,10 @@ export default function Login() {
                   width: 58, height: 58, borderRadius: 16,
                   background: "linear-gradient(150deg, var(--brand-400), var(--brand-600))",
                   display: "flex", alignItems: "center", justifyContent: "center",
-                  color: "#fff", fontSize: 30, fontWeight: 800,
                   boxShadow: "var(--shadow-md)",
                 }}
               >
-                Q
+                <BrandMark size={34} />
               </span>
               <h1 style={{ fontSize: "var(--text-xl)", marginTop: 12 }}>Qulay Navbat</h1>
               <p style={{ color: "var(--gray-500)", fontSize: "var(--text-sm)", marginTop: 4, textAlign: "center" }}>
