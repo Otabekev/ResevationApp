@@ -43,6 +43,24 @@ async def complete_web_login(
         return resp.json()
 
 
+async def complete_location_share(nonce: str, latitude: float, longitude: float) -> dict:
+    """Send an owner's shared business location to the backend, keyed by the
+    browser's nonce. Protected by BOT_SECRET."""
+    async with httpx.AsyncClient() as client:
+        resp = await client.post(
+            f"{BACKEND_URL}/businesses/location-share/complete",
+            json={
+                "nonce": nonce,
+                "latitude": latitude,
+                "longitude": longitude,
+                "bot_secret": BOT_SECRET,
+            },
+            timeout=10,
+        )
+        resp.raise_for_status()
+        return resp.json()
+
+
 async def update_language(token: str, language: str) -> None:
     """Persist the user's language so backend notifications match the bot."""
     async with httpx.AsyncClient() as client:

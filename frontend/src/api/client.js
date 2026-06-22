@@ -86,6 +86,10 @@ export const updateMyLanguage = (language) =>
 
 // ── Businesses ────────────────────────────────────────────────────────────────
 export const getCategories = () => api.get("/businesses/categories").then((r) => r.data);
+// Telegram location handshake: the browser polls this with its nonce until the
+// owner shares their business location in the bot, then it returns the coords.
+export const pollLocationShare = (nonce) =>
+  api.get(`/businesses/location-share/poll/${nonce}`).then((r) => r.data);
 export const getMyBusinesses = () => api.get("/businesses/mine").then((r) => r.data);
 export const getBusiness = (id) => api.get(`/businesses/${id}`).then((r) => r.data);
 export const createBusiness = (data) => api.post("/businesses", data).then((r) => r.data);

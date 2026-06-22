@@ -183,21 +183,22 @@ export default function BusinessSetup() {
 
         {error && <p className="form-error" style={{ marginTop: "var(--space-3)" }}>{error}</p>}
 
-        <div className="row" style={{ justifyContent: "space-between", marginTop: "var(--space-5)" }}>
-          <button
-            type="button"
-            className="btn btn-ghost"
-            onClick={() => setStep((s) => Math.max(0, s - 1))}
-            style={{ visibility: step === 0 ? "hidden" : "visible" }}
-          >
-            <IconArrowLeft size={16} /> {t("back")}
-          </button>
+        <div className="wizard-actions">
+          {step > 0 && (
+            <button
+              type="button"
+              className="btn btn-ghost wizard-back"
+              onClick={() => setStep((s) => Math.max(0, s - 1))}
+            >
+              <IconArrowLeft size={16} /> {t("back")}
+            </button>
+          )}
           {step < STEPS - 1 ? (
-            <button type="button" className="btn btn-primary" disabled={!canNext} onClick={() => setStep((s) => s + 1)}>
+            <button type="button" className="btn btn-primary wizard-cta" disabled={!canNext} onClick={() => setStep((s) => s + 1)}>
               {t("continue")}
             </button>
           ) : (
-            <button type="button" className="btn btn-primary" disabled={saving} onClick={handleSubmit}>
+            <button type="button" className="btn btn-primary wizard-cta" disabled={saving} onClick={handleSubmit}>
               {saving ? t("loading") : (<><IconCheck size={16} /> {t("register_business")}</>)}
             </button>
           )}

@@ -7,7 +7,10 @@ from aiogram.types import (
     CallbackQuery,
     InlineKeyboardButton,
     InlineKeyboardMarkup,
+    KeyboardButton,
     Message,
+    ReplyKeyboardMarkup,
+    ReplyKeyboardRemove,
 )
 
 import api_client
@@ -98,6 +101,12 @@ async def cmd_start(message: Message, state: FSMContext) -> None:
             ])
         )
         return
+    if start_param.startswith("setloc_"):
+        # setloc_{nonce} — owner is setting their business location from the
+        # dashboard. Show Telegram's native location-share button; the result
+        # is posted back to the backend keyed by the browser's nonce.
+        await _handle_setloc_prompt(message, state, start_param[7:])
+        return
 
     # Every /start asks for language first — older users often share a device
     # and expect to pick their language each time. set_language then routes on.
@@ -122,6 +131,44 @@ async def _handle_join(message: Message, state: FSMContext, token: str) -> None:
         )
     except Exception:
         await message.answer(t("join_invalid", lang))
+
+
+async def _handle_setloc_prompt(message: Message, state: FSMContext, nonce: str) -> None:
+    """Stash the browser's nonce and show Telegram's native location-share
+    button. Tapping it (or 📎 → Location) sends a location message we forward
+    to the backend in on_location_shared."""
+    data = await state.get_data()
+    lang = data.get("lang", "uz")
+    nonce = (nonce or "").strip()
+    if not nonce or len(nonce) > 64 or not all(c.isalnum() or c in "-_" for c in nonce):
+        await message.answer(t("setloc_invalid", lang))
+        return
+    await state.update_data(setloc_nonce=nonce)
+    kb = ReplyKeyboardMarkup(
+        keyboard=[[KeyboardButton(text=t("setloc_button", lang), request_location=True)]],
+        resize_keyboard=True,
+        one_time_keyboard=True,
+    )
+    await message.answer(t("setloc_prompt", lang), reply_markup=kb)
+
+
+@router.message(F.location)
+async def on_location_shared(message: Message, state: FSMContext) -> None:
+    """Owner shared a location after a setloc_ deep-link → forward it to the
+    backend keyed by the browser's nonce. Stray locations (no pending nonce)
+    are ignored so this never interferes with other flows."""
+    data = await state.get_data()
+    nonce = data.get("setloc_nonce")
+    if not nonce:
+        return
+    lang = data.get("lang", "uz")
+    loc = message.location
+    try:
+        await api_client.complete_location_share(nonce, loc.latitude, loc.longitude)
+        await state.update_data(setloc_nonce=None)
+        await message.answer(t("setloc_success", lang), reply_markup=ReplyKeyboardRemove())
+    except Exception:
+        await message.answer(t("setloc_failed", lang), reply_markup=ReplyKeyboardRemove())
 
 
 @router.callback_query(F.data.startswith("weblogin_"))

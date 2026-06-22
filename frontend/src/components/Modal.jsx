@@ -1,4 +1,5 @@
 import { useEffect } from "react";
+import { createPortal } from "react-dom";
 import { IconX } from "./icons";
 
 /**
@@ -17,7 +18,11 @@ export default function Modal({ title, onClose, children, footer, maxWidth = 500
     };
   }, [onClose]);
 
-  return (
+  // Rendered through a portal to <body> so the fixed overlay is positioned
+  // against the viewport, not trapped by an ancestor that has a lingering
+  // transform (e.g. the page's `.animate-in` wrapper) — which would otherwise
+  // size/clip the sheet to the scrolled page and push its top off-screen.
+  return createPortal(
     <div
       className="modal-overlay"
       onClick={(e) => e.target === e.currentTarget && onClose()}
@@ -33,6 +38,7 @@ export default function Modal({ title, onClose, children, footer, maxWidth = 500
         {children}
         {footer && <div className="modal-footer">{footer}</div>}
       </div>
-    </div>
+    </div>,
+    document.body,
   );
 }
