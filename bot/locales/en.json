@@ -57,5 +57,10 @@
   "web_login_confirm": "🔐 Confirm login to the web dashboard? If this wasn't you, ignore this message.",
   "web_login_yes": "✅ Yes, it's me",
   "web_login_done": "✅ Done! Return to your browser — you're logged in.",
-  "web_login_failed": "❌ Login failed. Please try again from the browser."
+  "web_login_failed": "❌ Login failed. Please try again from the browser.",
+  "setloc_prompt": "📍 Share your business location.\n\nStanding in your shop, tap the “📍 Send location” button below, or pick it on the map via 📎 → Location.",
+  "setloc_button": "📍 Send location",
+  "setloc_success": "✅ Thanks! Location received. Go back to the app (browser) and continue.",
+  "setloc_failed": "⚠️ Couldn't save the location. Please try again from the app.",
+  "setloc_invalid": "⚠️ This link expired. Tap “Set location via Telegram” in the app again."
 }

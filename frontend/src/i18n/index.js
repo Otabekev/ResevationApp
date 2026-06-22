@@ -263,7 +263,13 @@ const translations = {
 
     // Location
     business_location: "Biznes manzili (xaritada)",
-    location_hint: "Mijozlar lokatsiyani bir tegish bilan ochadi va yo'l oladi. Do'koningizda turib \"Joriy lokatsiya\"ni bosing.",
+    location_hint: "Mijozlar manzilni bir tegishda ochib, yo'l oladi. Joylashuvni Telegram orqali yuboring — eng oson yo'li.",
+    set_location_telegram: "Telegram orqali joylashuvni yuborish",
+    change_location: "Joylashuvni o'zgartirish",
+    location_waiting: "Telegramda joylashuv kutilmoqda…",
+    location_open_telegram: "Telegram ochilmadimi? Bu yerni bosing",
+    location_timeout: "Vaqt tugadi. Qayta urinib ko'ring.",
+    location_failed: "Joylashuvni olishda xatolik. Qayta urinib ko'ring.",
     use_my_location: "Joriy lokatsiyadan olish",
     locating: "Aniqlanmoqda...",
     remove_location: "O'chirish",
@@ -550,7 +556,13 @@ const translations = {
 
     // Location
     business_location: "Адрес на карте",
-    location_hint: "Клиенты откроют локацию одним касанием и построят маршрут. Находясь в заведении, нажмите «Текущая локация».",
+    location_hint: "Клиенты откроют адрес одним касанием и построят маршрут. Отправьте локацию через Telegram — это самый простой способ.",
+    set_location_telegram: "Отправить локацию через Telegram",
+    change_location: "Изменить локацию",
+    location_waiting: "Ждём локацию из Telegram…",
+    location_open_telegram: "Telegram не открылся? Нажмите здесь",
+    location_timeout: "Время вышло. Попробуйте ещё раз.",
+    location_failed: "Не удалось получить локацию. Попробуйте ещё раз.",
     use_my_location: "Взять текущую локацию",
     locating: "Определяем...",
     remove_location: "Удалить",
@@ -833,7 +845,13 @@ const translations = {
 
     // Location
     business_location: "Location on map",
-    location_hint: "Customers open it with one tap and get directions. Standing in your shop, tap \"Use current location\".",
+    location_hint: "Customers open your address with one tap and get directions. Send your location via Telegram — it's the easiest way.",
+    set_location_telegram: "Send location via Telegram",
+    change_location: "Change location",
+    location_waiting: "Waiting for location from Telegram…",
+    location_open_telegram: "Telegram didn't open? Tap here",
+    location_timeout: "Timed out. Please try again.",
+    location_failed: "Couldn't get the location. Please try again.",
     use_my_location: "Use current location",
     locating: "Locating...",
     remove_location: "Remove",

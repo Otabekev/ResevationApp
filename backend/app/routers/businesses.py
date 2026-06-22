@@ -1,3 +1,4 @@
+import hmac
 from datetime import datetime, timedelta, timezone
 
 from fastapi import APIRouter, Depends, HTTPException, status
@@ -5,6 +6,8 @@ from pydantic import BaseModel
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app import location_share_store
+from app.config import settings
 from app.database import get_db
 from app.deps import get_current_business_owner, get_current_super_admin, get_current_user
 from app.models.business import Business, BusinessCategory
@@ -100,6 +103,49 @@ async def list_categories(db: AsyncSession = Depends(get_db)):
         select(BusinessCategory).where(BusinessCategory.is_active == True).order_by(BusinessCategory.sort_order)
     )
     return result.scalars().all()
+
+
+# ── Set business location via the Telegram bot (deep-link + poll) ─────────────
+# Owners can't easily get raw coordinates from a phone, so instead of a map/paste
+# field we reuse the web-login handshake: the browser makes a nonce, opens
+# t.me/<bot>?start=setloc_<nonce>, the owner taps Telegram's native "Send
+# location", the bot posts the coords here (bot_secret), and the browser's poll
+# drops them into the setup form. Same one-time, self-expiring nonce store.
+
+class LocationShareComplete(BaseModel):
+    nonce: str
+    latitude: float
+    longitude: float
+    bot_secret: str  # shared secret between bot and backend
+
+
+@router.post("/location-share/complete")
+async def complete_location_share(body: LocationShareComplete):
+    """Called by the bot when an owner shares their location. Parks the coords
+    keyed by the browser's nonce. Protected by BOT_SECRET, fail-closed."""
+    if not settings.bot_secret or not hmac.compare_digest(body.bot_secret, settings.bot_secret):
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Invalid bot secret")
+
+    nonce = body.nonce.strip()
+    if not nonce or len(nonce) > 64 or not all(c.isalnum() or c in "-_" for c in nonce):
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Invalid nonce")
+    if not (-90 <= body.latitude <= 90 and -180 <= body.longitude <= 180):
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Invalid coordinates")
+
+    await location_share_store.save(
+        nonce, {"latitude": round(body.latitude, 6), "longitude": round(body.longitude, 6)}
+    )
+    return {"ok": True}
+
+
+@router.get("/location-share/poll/{nonce}")
+async def poll_location_share(nonce: str):
+    """Polled by the browser. Returns the shared coordinates once (one-time
+    read), otherwise {status: pending}."""
+    data = await location_share_store.take(nonce)
+    if not data:
+        return {"status": "pending"}
+    return {"status": "ok", **data}
 
 
 # ── Business CRUD ────────────────────────────────────────────────────────────

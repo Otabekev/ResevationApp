@@ -57,5 +57,10 @@
   "web_login_confirm": "🔐 Veb-paneliga kirishni tasdiqlaysizmi? Agar bu siz bo'lmasangiz, ushbu xabarni e'tiborsiz qoldiring.",
   "web_login_yes": "✅ Ha, bu men",
   "web_login_done": "✅ Tayyor! Brauzeringizga qayting — siz tizimga kirdingiz.",
-  "web_login_failed": "❌ Kirishda xatolik. Iltimos, brauzerda qaytadan urinib ko'ring."
+  "web_login_failed": "❌ Kirishda xatolik. Iltimos, brauzerda qaytadan urinib ko'ring.",
+  "setloc_prompt": "📍 Biznesingiz joylashuvini yuboring.\n\nDo'koningizda turib pastdagi «📍 Joylashuvni yuborish» tugmasini bosing, yoki 📎 → Joylashuv orqali xaritadan tanlang.",
+  "setloc_button": "📍 Joylashuvni yuborish",
+  "setloc_success": "✅ Rahmat! Joylashuv qabul qilindi. Ilovaga (brauzerga) qaytib, davom eting.",
+  "setloc_failed": "⚠️ Joylashuvni saqlab bo'lmadi. Ilovadan qaytadan urinib ko'ring.",
+  "setloc_invalid": "⚠️ Havola eskirgan. Ilovada «Telegram orqali joylashuv» tugmasini qayta bosing."
 }
