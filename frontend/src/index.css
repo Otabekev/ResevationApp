@@ -651,6 +651,29 @@ select {
 .cat-card:hover { border-color: var(--gray-300); transform: translateY(-2px); box-shadow: var(--shadow-sm); }
 .cat-card.on { border-color: var(--brand-500); background: var(--brand-50); color: var(--brand-800); box-shadow: var(--ring); }
 
+/* Wizard action row: back + primary CTA. Desktop keeps back-left / CTA-right.
+   On narrow phones the CTA drops to its own full-width line so long labels
+   (e.g. "Biznesni ro'yxatdan o'tkazish") can't overflow the card. */
+.wizard-actions { display: flex; align-items: center; gap: var(--space-3); margin-top: var(--space-5); }
+.wizard-actions .wizard-cta { margin-left: auto; }
+@media (max-width: 480px) {
+  .wizard-actions { flex-wrap: wrap; }
+  .wizard-actions .wizard-cta { flex: 1 1 100%; margin-left: 0; }
+}
+
+/* Schedule — working-hours day rows. The two time inputs + dash form one
+   non-wrapping unit (.time-range) so the dash is never orphaned on its own
+   line; on narrow phones the whole range drops below the day label + toggle. */
+.day-hours { display: flex; align-items: center; flex-wrap: wrap; gap: 10px; }
+.day-hours-name { width: 36px; font-weight: 750; font-size: var(--text-sm); flex-shrink: 0; }
+.day-hours .time-range { display: flex; align-items: center; gap: 8px; }
+.day-hours .time-range input[type="time"] { width: 116px; min-height: 40px; }
+.day-hours .time-sep { color: var(--gray-400); }
+@media (max-width: 400px) {
+  .day-hours .time-range { flex: 1 1 100%; }
+  .day-hours .time-range input[type="time"] { flex: 1; width: auto; min-width: 0; }
+}
+
 /* ── Utilities ───────────────────────────────────────────────────────────── */
 .muted { color: var(--gray-500); }
 .stack { display: flex; flex-direction: column; gap: var(--space-3); }

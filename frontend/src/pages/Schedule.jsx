@@ -165,8 +165,8 @@ export default function Schedule() {
 
             <div className="stack" style={{ gap: 10 }}>
               {hours.map((h, idx) => (
-                <div key={h.day_of_week} className="row" style={{ gap: 10, flexWrap: "wrap" }}>
-                  <span style={{ width: 36, fontWeight: 750, fontSize: "var(--text-sm)", flexShrink: 0 }}>
+                <div key={h.day_of_week} className="day-hours">
+                  <span className="day-hours-name">
                     {t(`wdm_${h.day_of_week}`)}
                   </span>
                   <label className="toggle" style={{ transform: "scale(.92)" }}>
@@ -180,19 +180,19 @@ export default function Schedule() {
                     <span className="toggle-slider"></span>
                   </label>
                   {!h.is_day_off ? (
-                    <>
+                    <div className="time-range">
                       <input
                         type="time" value={h.start_time}
                         onChange={(e) => updateDay(idx, "start_time", e.target.value)}
-                        disabled={saving} style={{ width: 110, minHeight: 40 }}
+                        disabled={saving}
                       />
-                      <span style={{ color: "var(--gray-400)" }}>–</span>
+                      <span className="time-sep">–</span>
                       <input
                         type="time" value={h.end_time}
                         onChange={(e) => updateDay(idx, "end_time", e.target.value)}
-                        disabled={saving} style={{ width: 110, minHeight: 40 }}
+                        disabled={saving}
                       />
-                    </>
+                    </div>
                   ) : (
                     <span className="chip">{t("day_off")}</span>
                   )}
