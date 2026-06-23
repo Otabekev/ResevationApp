@@ -532,7 +532,9 @@ select {
 @media (min-width: 640px) { .modal-overlay { align-items: center; padding: var(--space-6); } }
 .modal {
   background: var(--surface); border-radius: var(--radius-lg) var(--radius-lg) 0 0;
-  width: 100%; max-width: 500px; max-height: 92dvh; overflow-y: auto;
+  width: 100%; max-width: 500px; overflow-y: auto;
+  max-height: 92vh;   /* fallback: older Android Chrome/WebView don't support dvh */
+  max-height: 92dvh;  /* modern: also subtracts the browser's dynamic toolbar */
   padding: var(--space-5); padding-bottom: calc(var(--space-5) + env(safe-area-inset-bottom));
   box-shadow: var(--shadow-lg); animation: sheet-up var(--dur-slow) var(--ease-out);
 }
