@@ -22,6 +22,9 @@ class Staff(Base):
 
     is_active: Mapped[bool] = mapped_column(Boolean, default=True)
     can_set_own_hours: Mapped[bool] = mapped_column(Boolean, default=False)
+    # True when this provider record IS the business owner working as a bookable
+    # provider (auto-linked to the owner's account, no invite). One per business.
+    is_owner: Mapped[bool] = mapped_column(Boolean, default=False, server_default="false")
 
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
 

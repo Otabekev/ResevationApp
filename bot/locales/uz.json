@@ -62,5 +62,6 @@
   "setloc_button": "📍 Joylashuvni yuborish",
   "setloc_success": "✅ Rahmat! Joylashuv qabul qilindi. Ilovaga (brauzerga) qaytib, davom eting.",
   "setloc_failed": "⚠️ Joylashuvni saqlab bo'lmadi. Ilovadan qaytadan urinib ko'ring.",
-  "setloc_invalid": "⚠️ Havola eskirgan. Ilovada «Telegram orqali joylashuv» tugmasini qayta bosing."
+  "setloc_invalid": "⚠️ Havola eskirgan. Ilovada «Telegram orqali joylashuv» tugmasini qayta bosing.",
+  "welcome_book_cta": "Assalomu alaykum! 👋\nNavbatga yozilish uchun pastdagi «📅 Bron qilish» tugmasini bosing."
 }

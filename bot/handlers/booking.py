@@ -90,31 +90,43 @@ async def _lang(state: FSMContext) -> str:
 
 # ── Start booking ─────────────────────────────────────────────────────────────
 
-@router.callback_query(F.data == "book_start")
-async def book_start(callback: CallbackQuery, state: FSMContext) -> None:
-    lang = await _lang(state)
-
+async def _categories_view(lang: str):
+    """Build the category-selection step. Returns (text, keyboard), or
+    (None, None) if the backend is unreachable."""
     try:
         categories = await api_client.get_categories()
     except Exception:
-        await callback.answer(t("server_error", lang), show_alert=True)
-        return
-
+        return None, None
     if not categories:
-        await callback.message.edit_text(
-            t("no_categories", lang),
-            reply_markup=InlineKeyboardMarkup(inline_keyboard=main_menu_button(lang)),
-        )
-        await callback.answer()
-        return
+        return t("no_categories", lang), InlineKeyboardMarkup(inline_keyboard=main_menu_button(lang))
 
     def cat_label(c):
         icon = c.get("icon", "") or ""
         name = c.get(f"name_{lang}") or c.get("name_uz", "")
         return f"{icon} {name}".strip()
 
-    kb = paginate_buttons(categories, "cat_", "id", cat_label, lang)
-    await callback.message.edit_text(t("choose_business_category", lang), reply_markup=kb)
+    return t("choose_business_category", lang), paginate_buttons(categories, "cat_", "id", cat_label, lang)
+
+
+async def start_booking_from_message(message: Message, state: FSMContext) -> None:
+    """Begin booking from a plain text message (the always-docked 'Bron qilish'
+    button) by sending a fresh message instead of editing an existing one."""
+    lang = await _lang(state)
+    text, kb = await _categories_view(lang)
+    if text is None:
+        await message.answer(t("server_error", lang))
+        return
+    await message.answer(text, reply_markup=kb)
+
+
+@router.callback_query(F.data == "book_start")
+async def book_start(callback: CallbackQuery, state: FSMContext) -> None:
+    lang = await _lang(state)
+    text, kb = await _categories_view(lang)
+    if text is None:
+        await callback.answer(t("server_error", lang), show_alert=True)
+        return
+    await callback.message.edit_text(text, reply_markup=kb)
     await callback.answer()
 
 

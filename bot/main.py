@@ -5,7 +5,7 @@ from aiogram import Bot, Dispatcher
 from aiogram.client.default import DefaultBotProperties
 from aiogram.enums import ParseMode
 from aiogram.fsm.storage.redis import RedisStorage
-from aiogram.types import ErrorEvent
+from aiogram.types import BotCommand, ErrorEvent
 
 from config import BOT_TOKEN, REDIS_URL
 from handlers import booking, my_bookings, start
@@ -38,6 +38,12 @@ async def main() -> None:
                 await callback.answer("⚠️ Error. Try again / Xatolik. Qayta urinib ko'ring.", show_alert=False)
             except Exception:
                 pass
+
+    # Menu button (left of the input field) shows a clear, localized command so
+    # users who don't know to type /start still have an obvious one-tap way in.
+    await bot.set_my_commands([
+        BotCommand(command="start", description="📅 Bron qilish / Boshlash"),
+    ])
 
     logger.info("Bot starting...")
     await dp.start_polling(bot, allowed_updates=["message", "callback_query"])

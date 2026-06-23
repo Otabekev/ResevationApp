@@ -62,5 +62,6 @@
   "setloc_button": "📍 Send location",
   "setloc_success": "✅ Thanks! Location received. Go back to the app (browser) and continue.",
   "setloc_failed": "⚠️ Couldn't save the location. Please try again from the app.",
-  "setloc_invalid": "⚠️ This link expired. Tap “Set location via Telegram” in the app again."
+  "setloc_invalid": "⚠️ This link expired. Tap “Set location via Telegram” in the app again.",
+  "welcome_book_cta": "Hello! 👋\nTo book an appointment, tap the “📅 Bron qilish” button below."
 }

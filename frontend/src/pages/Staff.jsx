@@ -1,7 +1,7 @@
 import { useEffect, useState } from "react";
 import {
   getStaff, createStaff, updateStaff, getServices, setStaffServices, createStaffInvite,
-  getStaffWorkingHours, setStaffWorkingHours, clearStaffWorkingHours,
+  getStaffWorkingHours, setStaffWorkingHours, clearStaffWorkingHours, addSelfProvider,
 } from "../api/client";
 import useStore from "../store/useStore";
 import { useT } from "../i18n";
@@ -71,6 +71,17 @@ export default function Staff() {
     setForm({ name: s.name, phone: s.phone || "", bio: s.bio || "", role: s.role, can_set_own_hours: s.can_set_own_hours, is_active: s.is_active });
     setEditing(s.id);
     setShowModal(true);
+  };
+
+  // Owner adds a bookable provider profile for themselves (auto-linked, no invite).
+  const handleAddSelf = async () => {
+    try {
+      await addSelfProvider(activeBusiness.id, {});
+      await load();
+      setToast({ message: t("saved"), variant: "success" });
+    } catch (e) {
+      setToast({ message: e.response?.data?.detail || t("error"), variant: "error" });
+    }
   };
 
   const handleSave = async (e) => {
@@ -169,6 +180,10 @@ export default function Staff() {
     return <EmptyState icon={<IconUsers size={26} />} title={t("select_business_first")} subtitle={t("select_business_desc")} />;
   }
 
+  const hasOwnerProvider = staffList.some((s) => s.is_owner);
+  // Pin the owner's own provider profile to the top of the list.
+  const orderedStaff = [...staffList].sort((a, b) => (b.is_owner === true) - (a.is_owner === true));
+
   return (
     <div className="animate-in">
       <div className="page-header">
@@ -176,9 +191,16 @@ export default function Staff() {
           <h1 className="page-title">{t("staff")}</h1>
           <p className="page-subtitle">{t("staff_subtitle")}</p>
         </div>
-        <button className="btn btn-primary" onClick={openNew}>
-          <IconPlus size={17} /> {t("new_staff")}
-        </button>
+        <div className="row" style={{ gap: "var(--space-2)", flexWrap: "wrap" }}>
+          {!hasOwnerProvider && (
+            <button className="btn btn-secondary" onClick={handleAddSelf}>
+              <IconPlus size={17} /> {t("add_myself_provider")}
+            </button>
+          )}
+          <button className="btn btn-primary" onClick={openNew}>
+            <IconPlus size={17} /> {t("new_staff")}
+          </button>
+        </div>
       </div>
 
       {isLoading ? (
@@ -200,20 +222,21 @@ export default function Staff() {
         </div>
       ) : (
         <div className="stack stagger" style={{ gap: "var(--space-3)" }}>
-          {staffList.map((s) => (
+          {orderedStaff.map((s) => (
             <div key={s.id} className="card" style={{ opacity: s.is_active ? 1 : 0.6 }}>
               <div className="row" style={{ alignItems: "flex-start", gap: "var(--space-3)" }}>
                 <span className="avatar avatar-lg" aria-hidden>{initials(s.name)}</span>
                 <div className="grow">
                   <div className="row" style={{ gap: 8, flexWrap: "wrap" }}>
                     <span style={{ fontWeight: 750, fontSize: "var(--text-md)" }}>{s.name}</span>
-                    {s.role === "manager" && <span className="chip honey">{t("role_manager")}</span>}
+                    {s.is_owner && <span className="chip brand"><IconCheck size={12} /> {t("you_provider")}</span>}
+                    {s.role === "manager" && !s.is_owner && <span className="chip honey">{t("role_manager")}</span>}
                     {!s.is_active && <span className="chip">{t("inactive")}</span>}
-                    {s.user_id ? (
+                    {!s.is_owner && (s.user_id ? (
                       <span className="chip brand"><IconCheck size={12} /> {t("staff_joined")}</span>
                     ) : (
                       <span className="chip">{t("staff_not_joined")}</span>
-                    )}
+                    ))}
                   </div>
                   {s.phone && <div style={{ fontSize: "var(--text-sm)", color: "var(--gray-500)", marginTop: 2 }}>{s.phone}</div>}
                 </div>
@@ -348,7 +371,7 @@ export default function Staff() {
 
       {/* Per-staff hours */}
       {hoursFor && (
-        <Modal title={`${t("working_hours")} — ${hoursFor.name}`} onClose={() => setHoursFor(null)}>
+        <Modal title={hoursFor.is_owner ? t("my_working_hours") : `${t("working_hours")} — ${hoursFor.name}`} onClose={() => setHoursFor(null)}>
           <div className="form-group row" style={{ justifyContent: "space-between" }}>
             <div>
               <div style={{ fontWeight: 650, fontSize: "var(--text-sm)" }}>{t("custom_hours")}</div>

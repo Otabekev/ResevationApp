@@ -38,6 +38,22 @@ def language_keyboard() -> InlineKeyboardMarkup:
     ])
 
 
+# Always-docked launch button. Constant Uzbek text so it reads the same before a
+# language is chosen, and `is_persistent` keeps it pinned above the input field
+# across the whole chat — so older users can start a booking anytime with one
+# tap, never needing to type /start.
+BOOK_CTA_TEXT = "📅 Bron qilish"
+
+
+def booking_cta_keyboard() -> ReplyKeyboardMarkup:
+    return ReplyKeyboardMarkup(
+        keyboard=[[KeyboardButton(text=BOOK_CTA_TEXT)]],
+        resize_keyboard=True,
+        is_persistent=True,
+        input_field_placeholder=BOOK_CTA_TEXT,
+    )
+
+
 @router.message(CommandStart())
 async def cmd_start(message: Message, state: FSMContext) -> None:
     await state.clear()
@@ -108,6 +124,10 @@ async def cmd_start(message: Message, state: FSMContext) -> None:
         await _handle_setloc_prompt(message, state, start_param[7:])
         return
 
+    # Dock the always-on "Bron qilish" launch button (constant Uzbek — language
+    # is chosen next) so older users never have to type /start to begin again.
+    await message.answer(t("welcome_book_cta", lang), reply_markup=booking_cta_keyboard())
+
     # Every /start asks for language first — older users often share a device
     # and expect to pick their language each time. set_language then routes on.
     await message.answer(t("choose_language", lang), reply_markup=language_keyboard())
@@ -169,6 +189,13 @@ async def on_location_shared(message: Message, state: FSMContext) -> None:
         await message.answer(t("setloc_success", lang), reply_markup=ReplyKeyboardRemove())
     except Exception:
         await message.answer(t("setloc_failed", lang), reply_markup=ReplyKeyboardRemove())
+
+
+@router.message(F.text == BOOK_CTA_TEXT)
+async def on_booking_cta(message: Message, state: FSMContext) -> None:
+    """The always-docked 'Bron qilish' button → jump straight into booking."""
+    from handlers import booking
+    await booking.start_booking_from_message(message, state)
 
 
 @router.callback_query(F.data.startswith("weblogin_"))
