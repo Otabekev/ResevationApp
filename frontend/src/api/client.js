@@ -107,6 +107,9 @@ export const deleteService = (bizId, svcId) =>
 export const getStaff = (bizId) => api.get(`/businesses/${bizId}/staff`).then((r) => r.data);
 export const createStaff = (bizId, data) =>
   api.post(`/businesses/${bizId}/staff`, data).then((r) => r.data);
+// Create a provider profile for the owner themselves (auto-linked, no invite).
+export const addSelfProvider = (bizId, data = {}) =>
+  api.post(`/businesses/${bizId}/staff/me`, data).then((r) => r.data);
 export const updateStaff = (bizId, staffId, data) =>
   api.patch(`/businesses/${bizId}/staff/${staffId}`, data).then((r) => r.data);
 export const setStaffServices = (bizId, staffId, serviceIds) =>

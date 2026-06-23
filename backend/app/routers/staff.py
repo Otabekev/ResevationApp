@@ -47,10 +47,17 @@ class StaffOut(BaseModel):
     role: str
     is_active: bool
     can_set_own_hours: bool
+    is_owner: bool = False
     user_id: int | None
     service_ids: list[int] = []
 
     model_config = {"from_attributes": True}
+
+
+class SelfProviderCreate(BaseModel):
+    name: str | None = None  # defaults to the owner's account name
+    phone: str | None = None
+    service_ids: list[int] = []
 
 
 class InviteOut(BaseModel):
@@ -108,6 +115,46 @@ async def add_staff(
         bio=body.bio,
         role=body.role,
         can_set_own_hours=body.can_set_own_hours,
+    )
+    db.add(staff)
+    await db.flush()
+
+    for service_id in body.service_ids:
+        svc = await db.get(Service, service_id)
+        if svc and svc.business_id == business_id:
+            db.add(StaffService(staff_id=staff.id, service_id=service_id))
+
+    await db.commit()
+    await db.refresh(staff)
+    return await _staff_with_services(staff, db)
+
+
+@router.post("/me", response_model=StaffOut, status_code=status.HTTP_201_CREATED)
+async def add_self_as_provider(
+    business_id: int,
+    body: SelfProviderCreate,
+    user: User = Depends(get_current_business_owner),
+    db: AsyncSession = Depends(get_db),
+):
+    """Create a bookable provider profile for the owner themselves — auto-linked
+    to their account (no invite needed), so they can take appointments with
+    their own schedule. One per business; separate from the business profile."""
+    await _get_owned_business(business_id, user, db)
+
+    existing = await db.execute(
+        select(Staff).where(and_(Staff.business_id == business_id, Staff.is_owner == True))
+    )
+    if existing.scalar_one_or_none() is not None:
+        raise HTTPException(status_code=400, detail="Owner provider already exists")
+
+    staff = Staff(
+        business_id=business_id,
+        user_id=user.id,
+        is_owner=True,
+        name=(body.name or user.name or "Owner").strip(),
+        phone=body.phone,
+        role="manager",
+        can_set_own_hours=True,
     )
     db.add(staff)
     await db.flush()
