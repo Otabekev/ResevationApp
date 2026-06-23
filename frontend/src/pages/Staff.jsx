@@ -96,10 +96,12 @@ export default function Staff() {
     const newIds = currentIds.includes(serviceId)
       ? currentIds.filter((id) => id !== serviceId)
       : [...currentIds, serviceId];
+    // Optimistic: reflect the chip change immediately, roll back if the server rejects.
+    setStaffList((prev) => prev.map((s) => (s.id === staffId ? { ...s, service_ids: newIds } : s)));
     try {
       await setStaffServices(activeBusiness.id, staffId, newIds);
-      setStaffList((prev) => prev.map((s) => (s.id === staffId ? { ...s, service_ids: newIds } : s)));
     } catch {
+      setStaffList((prev) => prev.map((s) => (s.id === staffId ? { ...s, service_ids: currentIds } : s)));
       setToast({ message: t("error"), variant: "error" });
     }
   };
