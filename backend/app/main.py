@@ -4,6 +4,7 @@ from contextlib import asynccontextmanager
 
 from fastapi import Depends, FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.middleware.gzip import GZipMiddleware
 from fastapi.responses import JSONResponse
 from slowapi import _rate_limit_exceeded_handler
 from slowapi.errors import RateLimitExceeded
@@ -95,6 +96,11 @@ async def unhandled_exception_handler(request: Request, exc: Exception):
         content={"detail": "Internal server error", "request_id": request_id},
     )
 
+
+# Compress JSON/text responses above ~500 bytes (browsers always send
+# Accept-Encoding: gzip). Shrinks transfer size on slow mobile networks; small
+# responses skip it so we don't spend CPU compressing for no real gain.
+app.add_middleware(GZipMiddleware, minimum_size=500)
 
 app.add_middleware(
     CORSMiddleware,

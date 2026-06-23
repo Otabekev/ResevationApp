@@ -101,10 +101,14 @@ export default function Services() {
   };
 
   const handleToggle = async (svc) => {
+    const next = !svc.is_active;
+    // Optimistic: flip the toggle immediately, then reconcile with the server —
+    // roll back and warn only if it rejects. Feels instant despite backend latency.
+    setServices((prev) => prev.map((s) => (s.id === svc.id ? { ...s, is_active: next } : s)));
     try {
-      await updateService(activeBusiness.id, svc.id, { is_active: !svc.is_active });
-      await load();
+      await updateService(activeBusiness.id, svc.id, { is_active: next });
     } catch {
+      setServices((prev) => prev.map((s) => (s.id === svc.id ? { ...s, is_active: !next } : s)));
       setToast({ message: t("error"), variant: "error" });
     }
   };
