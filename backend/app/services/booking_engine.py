@@ -104,35 +104,52 @@ async def _get_working_window(
     target_date: date,
 ) -> Interval | None:
     """
-    Returns the working window for a staff member on a given date.
-    Staff-level schedule takes priority over business-level schedule.
-    Returns None if the day is a day off or no schedule is defined.
+    Returns the bookable window for a staff member on a given date.
+
+    The BUSINESS schedule is the hard ceiling: if the shop is closed that day,
+    nobody is bookable — even a staff member who left their own schedule open.
+    A staff member's own hours can only NARROW within the shop's open hours,
+    never extend past them (so a stray open day/time can't create bookings the
+    business never intended). Returns None when nothing is bookable.
     """
     dow = target_date.weekday()  # 0=Monday, 6=Sunday
 
-    # Try staff-specific schedule first
-    stmt = select(WorkingHours).where(
-        and_(WorkingHours.staff_id == staff.id, WorkingHours.day_of_week == dow)
-    )
-    result = await db.execute(stmt)
-    row = result.scalar_one_or_none()
-
-    # Fall back to business schedule
-    if row is None:
-        stmt = select(WorkingHours).where(
+    # Business window first — this is the boundary the shop set.
+    biz_result = await db.execute(
+        select(WorkingHours).where(
             and_(
                 WorkingHours.business_id == staff.business_id,
                 WorkingHours.staff_id.is_(None),
                 WorkingHours.day_of_week == dow,
             )
         )
-        result = await db.execute(stmt)
-        row = result.scalar_one_or_none()
+    )
+    biz_row = biz_result.scalar_one_or_none()
+    if biz_row is not None and biz_row.is_day_off:
+        return None  # shop is closed this day → no bookings for anyone
+    biz_window = Interval(biz_row.start_time, biz_row.end_time) if biz_row is not None else None
 
-    if row is None or row.is_day_off:
-        return None
+    # Staff-specific schedule (optional) — narrows within the business window.
+    staff_result = await db.execute(
+        select(WorkingHours).where(
+            and_(WorkingHours.staff_id == staff.id, WorkingHours.day_of_week == dow)
+        )
+    )
+    staff_row = staff_result.scalar_one_or_none()
 
-    return Interval(row.start_time, row.end_time)
+    if staff_row is not None:
+        if staff_row.is_day_off:
+            return None  # this provider is off today
+        staff_window = Interval(staff_row.start_time, staff_row.end_time)
+        if biz_window is None:
+            return staff_window
+        # Clamp the staff hours to the shop's open hours.
+        start = max(biz_window.start, staff_window.start)
+        end = min(biz_window.end, staff_window.end)
+        return Interval(start, end) if start < end else None
+
+    # No staff override → the business window applies.
+    return biz_window
 
 
 async def _get_breaks(

@@ -87,6 +87,61 @@ async def test_create_booking_rejects_outside_working_hours(db):
         )
 
 
+# ── D6: business schedule is the ceiling over staff schedules ────────────────
+
+async def test_business_day_off_blocks_staff_with_open_hours(db):
+    """Shop closed that day → a staff member who left their own hours open must
+    still NOT be bookable."""
+    cat = await create_category(db)
+    owner = await create_user(db, role="business_owner", telegram_id=11)
+    biz = await create_business(db, owner_id=owner.id, category_id=cat.id)
+    svc = await create_service(db, business_id=biz.id, duration_minutes=30)
+    staff = await create_staff(db, business_id=biz.id)
+    await link_staff_service(db, staff_id=staff.id, service_id=svc.id)
+
+    target = date.today() + timedelta(days=3)
+    dow = target.weekday()
+    for d in range(7):
+        db.add(WorkingHours(
+            business_id=biz.id, day_of_week=d,
+            start_time=time(9, 0), end_time=time(18, 0), is_day_off=(d == dow),
+        ))
+    # Staff accidentally left their own schedule OPEN on the shop's closed day.
+    db.add(WorkingHours(
+        business_id=biz.id, staff_id=staff.id, day_of_week=dow,
+        start_time=time(9, 0), end_time=time(18, 0), is_day_off=False,
+    ))
+    await db.commit()
+
+    slots = await get_available_slots(db, biz.id, svc.id, target, staff.id)
+    assert slots == []
+
+
+async def test_staff_hours_clamped_to_business_hours(db):
+    """A staff member's open hours can't extend past the shop's open hours."""
+    cat = await create_category(db)
+    owner = await create_user(db, role="business_owner", telegram_id=12)
+    biz = await create_business(db, owner_id=owner.id, category_id=cat.id)
+    svc = await create_service(db, business_id=biz.id, duration_minutes=30)
+    staff = await create_staff(db, business_id=biz.id)
+    await link_staff_service(db, staff_id=staff.id, service_id=svc.id)
+
+    target = date.today() + timedelta(days=3)
+    dow = target.weekday()
+    for d in range(7):  # shop open 09:00–12:00
+        db.add(WorkingHours(business_id=biz.id, day_of_week=d, start_time=time(9, 0), end_time=time(12, 0)))
+    # Staff "open" 09:00–18:00 — must be clamped to 09:00–12:00.
+    db.add(WorkingHours(
+        business_id=biz.id, staff_id=staff.id, day_of_week=dow,
+        start_time=time(9, 0), end_time=time(18, 0),
+    ))
+    await db.commit()
+
+    slots = await get_available_slots(db, biz.id, svc.id, target, staff.id)
+    assert slots, "expected morning slots within shop hours"
+    assert max(s.start_time for s in slots) == time(11, 30)  # last 30-min start before 12:00
+
+
 # ── D1 (app level): sequential double-book is rejected cleanly ───────────────
 
 async def test_sequential_double_book_rejected(db):
