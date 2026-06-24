@@ -7,7 +7,16 @@ from config import BACKEND_URL, BOT_SECRET
 # backend alive and pools them, so each call reuses an open TLS connection
 # instead of doing a fresh handshake every time — that per-call handshake was
 # adding hundreds of ms to every step of the flow.
-_client = httpx.AsyncClient(timeout=10)
+#
+# keepalive_expiry drops idle connections after 30s so we never reuse one the
+# backend/proxy has already quietly closed (which would otherwise stall until the
+# read timeout). The structured timeout caps connect at 5s and any single call at
+# 10s, so a slow backend surfaces a clean error the handlers can show — never a
+# silent hang.
+_client = httpx.AsyncClient(
+    timeout=httpx.Timeout(10.0, connect=5.0),
+    limits=httpx.Limits(max_keepalive_connections=20, max_connections=100, keepalive_expiry=30.0),
+)
 
 
 async def auth_user(telegram_id: int, name: str, username: str | None, language: str) -> dict:

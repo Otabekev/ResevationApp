@@ -18,7 +18,22 @@ async def main() -> None:
     if not BOT_TOKEN:
         raise RuntimeError("TELEGRAM_BOT_TOKEN is not set")
 
-    storage = RedisStorage.from_url(REDIS_URL)
+    # Redis holds each user's conversation state (which booking step they're on)
+    # and is read/written on EVERY button tap. With no timeout, a single stalled
+    # Redis call over a flaky network hangs the whole update forever — the user
+    # sees a frozen button that never responds. These settings cap any single
+    # call at 5s (so the @dp.errors guard below can release the spinner and ask
+    # them to retry instead of an infinite freeze) and keep the link healthy.
+    storage = RedisStorage.from_url(
+        REDIS_URL,
+        connection_kwargs={
+            "socket_timeout": 5,          # a single op can't hang longer than 5s
+            "socket_connect_timeout": 5,  # nor can (re)connecting
+            "socket_keepalive": True,     # keep the TCP link warm between taps
+            "health_check_interval": 30,  # ping idle conns so stale ones get recycled
+            "retry_on_timeout": True,     # one automatic retry before surfacing an error
+        },
+    )
     bot = Bot(token=BOT_TOKEN, default=DefaultBotProperties(parse_mode=ParseMode.HTML))
     dp = Dispatcher(storage=storage)
 
