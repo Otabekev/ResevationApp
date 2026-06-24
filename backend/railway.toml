@@ -12,12 +12,11 @@ preDeployCommand = "alembic upgrade head"
 # Without the shell, Railway passes the literal string "$PORT" to uvicorn
 # and Click rejects it with: Invalid value for '--port': '$PORT' is not a valid integer.
 #
-# Bind `::` (IPv6 dual-stack), NOT 0.0.0.0: Railway's private network
-# (backend.railway.internal) is IPv6-only, so 0.0.0.0 can't receive private
-# traffic. `::` on Linux accepts BOTH IPv6 (private net) and IPv4 (public proxy
-# + healthcheck), so it serves everything. This lets the bot reach the backend
-# over the private network instead of the public .up.railway.app edge.
-startCommand = "sh -c 'uvicorn app.main:app --host :: --port ${PORT:-8080}'"
+# NOTE: tried `--host ::` to put the bot↔backend on Railway's IPv6-only private
+# network, but it failed Railway's healthcheck — reverted to 0.0.0.0 (known-good
+# public bind). Revisit private networking as its own task if the speed-up is
+# still wanted.
+startCommand = "sh -c 'uvicorn app.main:app --host 0.0.0.0 --port ${PORT:-8080}'"
 healthcheckPath = "/health"
 # Generous window: uvicorn lifespan + first DB connect on cold Neon can be slow.
 healthcheckTimeout = 120
