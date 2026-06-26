@@ -1,14 +1,15 @@
 import { useEffect, useState } from "react";
 import { Link } from "react-router-dom";
-import { getBookings, getAnalytics } from "../api/client";
+import { getBookings, getAnalytics, updateBookingStatus, cancelBooking } from "../api/client";
 import useStore from "../store/useStore";
 import { useT } from "../i18n";
 import InstallBanner from "../components/InstallBanner";
 import EmptyState from "../components/EmptyState";
+import Toast from "../components/Toast";
 import dayjs from "dayjs";
 import {
   IconSparkle, IconCalendar, IconCheck, IconBan, IconClock,
-  IconUsers, IconChart, IconStore, IconChevronRight, IconPlus, IconShield,
+  IconUsers, IconChart, IconStore, IconChevronRight, IconPlus, IconShield, IconX,
 } from "../components/icons";
 
 const STATUS_BADGE = {
@@ -53,8 +54,10 @@ export default function Dashboard() {
   const { lang, user, activeBusiness, businesses } = useStore();
   const t = useT(lang);
   const [todayBookings, setTodayBookings] = useState([]);
+  const [pending, setPending] = useState([]);
   const [analytics, setAnalytics] = useState(null);
   const [loading, setLoading] = useState(true);
+  const [toast, setToast] = useState(null);
 
   useEffect(() => {
     if (!activeBusiness) {
@@ -66,13 +69,17 @@ export default function Dashboard() {
       setLoading(true);
       try {
         const today = dayjs().format("YYYY-MM-DD");
-        const [bookings, stats] = await Promise.all([
+        const [bookings, stats, pend] = await Promise.all([
           getBookings(activeBusiness.id, { booking_date: today }),
           getAnalytics(activeBusiness.id, 7),
+          // Everything still awaiting confirmation, any upcoming date — so the
+          // owner confirms from here instead of hunting day-by-day in Schedule.
+          getBookings(activeBusiness.id, { date_from: today, status: "pending" }),
         ]);
         if (!alive) return;
         setTodayBookings(bookings);
         setAnalytics(stats);
+        setPending(pend);
       } catch (e) {
         console.error(e);
       } finally {
@@ -82,6 +89,32 @@ export default function Dashboard() {
     load();
     return () => { alive = false; };
   }, [activeBusiness]);
+
+  // Confirm / decline a pending booking right from the dashboard. Optimistic:
+  // remove it from the list immediately, restore it if the call fails.
+  const handleConfirm = async (b) => {
+    setPending((p) => p.filter((x) => x.id !== b.id));
+    try {
+      await updateBookingStatus(b.id, "confirmed");
+      setTodayBookings((tb) => tb.map((x) => (x.id === b.id ? { ...x, status: "confirmed" } : x)));
+      setToast({ message: t("saved"), variant: "success" });
+    } catch {
+      setPending((p) => [b, ...p]);
+      setToast({ message: t("error"), variant: "error" });
+    }
+  };
+
+  const handleDecline = async (b) => {
+    setPending((p) => p.filter((x) => x.id !== b.id));
+    try {
+      await cancelBooking(b.id);
+      setTodayBookings((tb) => tb.filter((x) => x.id !== b.id));
+      setToast({ message: t("booking_cancelled_toast"), variant: "success" });
+    } catch {
+      setPending((p) => [b, ...p]);
+      setToast({ message: t("error"), variant: "error" });
+    }
+  };
 
   if (loading) return <DashboardSkeleton />;
 
@@ -160,6 +193,43 @@ export default function Dashboard() {
           <IconPlus size={17} /> {t("new_booking")}
         </Link>
       </div>
+
+      {/* New bookings awaiting confirmation — any upcoming date, confirm in one tap */}
+      {pending.length > 0 && (
+        <div className="card" style={{ borderLeft: "3px solid var(--warning)", marginBottom: "var(--space-4)" }}>
+          <div className="row" style={{ marginBottom: "var(--space-3)" }}>
+            <h2 className="card-title" style={{ display: "flex", alignItems: "center", gap: 8 }}>
+              {t("pending_confirmation")}
+              <span className="badge badge-pending">{pending.length}</span>
+            </h2>
+          </div>
+          <div className="stack" style={{ gap: "var(--space-2)" }}>
+            {pending.map((b) => (
+              <div key={b.id} className="booking-card card-tight" style={{ boxShadow: "none", padding: "var(--space-3)" }}>
+                <div className="booking-time">
+                  <span className="t1">{b.start_time?.slice(0, 5)}</span>
+                  <span className="t2">{dayjs(b.booking_date).format("DD.MM")}</span>
+                </div>
+                <div className="booking-main">
+                  <div style={{ fontWeight: 700 }} className="ellipsis">{b.customer_name}</div>
+                  <div className="booking-meta">
+                    <span>{svcName(b)}</span>
+                    {b.staff_name && <><span>·</span><span>{b.staff_name}</span></>}
+                  </div>
+                </div>
+                <div className="booking-actions">
+                  <button className="btn btn-primary btn-sm" onClick={() => handleConfirm(b)}>
+                    <IconCheck size={15} /> {t("confirm")}
+                  </button>
+                  <button className="btn btn-danger-soft btn-sm" title={t("cancel")} onClick={() => handleDecline(b)}>
+                    <IconX size={15} />
+                  </button>
+                </div>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
 
       {analytics && (
         <div className="stats-grid">
@@ -253,6 +323,8 @@ export default function Dashboard() {
           </Link>
         ))}
       </div>
+
+      <Toast toast={toast} onClose={() => setToast(null)} />
     </div>
   );
 }
