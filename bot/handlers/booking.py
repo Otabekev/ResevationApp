@@ -30,6 +30,7 @@ PHONE_RE = re.compile(r"^\+998\d{9}$")
 
 
 class BookingFSM(StatesGroup):
+    entering_name = State()
     entering_phone = State()
     confirming = State()
 
@@ -376,7 +377,23 @@ async def time_chosen(callback: CallbackQuery, state: FSMContext) -> None:
     await state.update_data(start_time=start_time)
 
     lang = await _lang(state)
-    await callback.message.edit_text(t("enter_phone", lang))
+    await callback.message.edit_text(t("enter_name", lang))
+    await state.set_state(BookingFSM.entering_name)
+
+
+# ── Name entered → ask for phone ─────────────────────────────────────────────
+
+@router.message(BookingFSM.entering_name)
+async def name_entered(message: Message, state: FSMContext) -> None:
+    """Take the name the customer types (not their Telegram display name, which
+    is often a nickname) so the business sees a real name."""
+    lang = (await state.get_data()).get("lang", "uz")
+    name = (message.text or "").strip()
+    if not (2 <= len(name) <= 100):
+        await message.answer(t("invalid_name", lang))
+        return
+    await state.update_data(customer_name=name)
+    await message.answer(t("enter_phone", lang))
     await state.set_state(BookingFSM.entering_phone)
 
 
@@ -392,7 +409,10 @@ async def phone_entered(message: Message, state: FSMContext) -> None:
         await message.answer(t("invalid_phone", lang))
         return
 
-    await state.update_data(customer_phone=phone, customer_name=message.from_user.full_name)
+    # Name was collected in the previous step; only fall back to the Telegram
+    # display name if it's somehow missing.
+    customer_name = data.get("customer_name") or message.from_user.full_name
+    await state.update_data(customer_phone=phone, customer_name=customer_name)
 
     price = data.get("service_price")
     price_str = (
@@ -407,6 +427,8 @@ async def phone_entered(message: Message, state: FSMContext) -> None:
         date=data.get("booking_date", "—"),
         time=data.get("start_time", "—"),
         price=price_str,
+        name=customer_name,
+        phone=phone,
     )
 
     await message.answer(
