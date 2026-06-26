@@ -12,6 +12,7 @@ the step handlers are registered WITHOUT FSM-state filters. That makes every
 of dying against a state filter. Only free-text input (phone) stays gated
 behind its FSM state.
 """
+import asyncio
 import re
 from datetime import date, timedelta
 
@@ -121,31 +122,31 @@ async def start_booking_from_message(message: Message, state: FSMContext) -> Non
 
 @router.callback_query(F.data == "book_start")
 async def book_start(callback: CallbackQuery, state: FSMContext) -> None:
+    await callback.answer()  # clear the Telegram spinner up front so the button never looks frozen
     lang = await _lang(state)
     text, kb = await _categories_view(lang)
     if text is None:
-        await callback.answer(t("server_error", lang), show_alert=True)
+        await callback.message.answer(t("server_error", lang))
         return
     await callback.message.edit_text(text, reply_markup=kb)
-    await callback.answer()
 
 
 # ── Category chosen → businesses ──────────────────────────────────────────────
 
 @router.callback_query(F.data.startswith("cat_"))
 async def category_chosen(callback: CallbackQuery, state: FSMContext) -> None:
+    await callback.answer()
     lang = await _lang(state)
     try:
         category_id = int(callback.data.split("_", 1)[1])
     except ValueError:
-        await callback.answer()
         return
     await state.update_data(category_id=category_id)
 
     try:
         businesses = await api_client.get_businesses_by_category(category_id)
     except Exception:
-        await callback.answer(t("server_error", lang), show_alert=True)
+        await callback.message.answer(t("server_error", lang))
         return
 
     if not businesses:
@@ -155,33 +156,48 @@ async def category_chosen(callback: CallbackQuery, state: FSMContext) -> None:
                 [InlineKeyboardButton(text=t("back", lang), callback_data="book_start")]
             ]),
         )
-        await callback.answer()
         return
 
     kb = paginate_buttons(businesses, "biz_", "id", lambda b: b["name"], lang, back_cb="book_start")
     await callback.message.edit_text(t("choose_business", lang), reply_markup=kb)
-    await callback.answer()
 
 
 # ── Business chosen → services ───────────────────────────────────────────────
 
 @router.callback_query(F.data.startswith("biz_"))
 async def business_chosen(callback: CallbackQuery, state: FSMContext) -> None:
+    await callback.answer()
     lang = await _lang(state)
     try:
         business_id = int(callback.data.split("_", 1)[1])
     except ValueError:
-        await callback.answer()
         return
 
+    # These two calls are independent — fetch them concurrently instead of one
+    # after the other (halves this step's backend wait).
     try:
-        services = await api_client.get_services(business_id)
-        biz = await api_client.get_public_business(business_id)
+        services, biz = await asyncio.gather(
+            api_client.get_services(business_id),
+            api_client.get_public_business(business_id),
+        )
     except Exception:
-        await callback.answer(t("server_error", lang), show_alert=True)
+        await callback.message.answer(t("server_error", lang))
         return
 
-    await state.update_data(business_id=business_id, business_name=biz.get("name", "—"))
+    # Stash each service's display name + price so the "service chosen" step can
+    # read them from state instead of re-fetching the whole list. Reset any
+    # staff cache from a previously-viewed business.
+    services_meta = {
+        str(s["id"]): {"name": s.get(f"name_{lang}") or s.get("name_uz", ""), "price": s.get("price")}
+        for s in services
+    }
+    await state.update_data(
+        business_id=business_id,
+        business_name=biz.get("name", "—"),
+        services_meta=services_meta,
+        staff_cache=None,
+        staff_names=None,
+    )
 
     if not services:
         await callback.message.edit_text(
@@ -190,7 +206,6 @@ async def business_chosen(callback: CallbackQuery, state: FSMContext) -> None:
                 [InlineKeyboardButton(text=t("back", lang), callback_data="book_start")]
             ]),
         )
-        await callback.answer()
         return
 
     def svc_label(s):
@@ -204,29 +219,35 @@ async def business_chosen(callback: CallbackQuery, state: FSMContext) -> None:
     back_cb = f"cat_{data['category_id']}" if data.get("category_id") else "book_start"
     kb = paginate_buttons(services, "svc_", "id", svc_label, lang, back_cb=back_cb)
     await callback.message.edit_text(t("choose_service", lang), reply_markup=kb)
-    await callback.answer()
 
 
 # ── Service chosen → staff ───────────────────────────────────────────────────
 
-async def _show_staff_step(callback: CallbackQuery, state: FSMContext) -> None:
+async def _show_staff_step(callback: CallbackQuery, state: FSMContext, data: dict | None = None) -> None:
     """Renders the staff-selection step from state (used by both the forward
-    path and the 'back' button on the date/time steps)."""
-    data = await state.get_data()
+    path and the 'back' button on the date/time steps). Callers that already
+    have the FSM data pass it in to save a Redis read. Callers must have already
+    answered the callback (cleared the spinner)."""
+    if data is None:
+        data = await state.get_data()
     lang = data.get("lang", "uz")
     business_id = data.get("business_id")
     if not business_id:
-        await callback.answer()
         return
 
-    try:
-        staff_list = await api_client.get_staff(business_id)
-    except Exception:
-        staff_list = []
-
-    # Map staff id → name so the summary can show a real name later.
-    staff_names = {str(s["id"]): s["name"] for s in staff_list}
-    await state.update_data(staff_names=staff_names)
+    # Reuse the staff list across forward + back navigation instead of re-fetching
+    # it from the backend on every visit (it's cleared when the business changes).
+    staff_list = data.get("staff_cache")
+    if staff_list is None:
+        try:
+            staff_list = await api_client.get_staff(business_id)
+        except Exception:
+            staff_list = []  # render empty this time, but don't cache a failure → retry on next visit
+        else:
+            await state.update_data(
+                staff_cache=staff_list,
+                staff_names={str(s["id"]): s["name"] for s in staff_list},
+            )
 
     rows = [[InlineKeyboardButton(text=t("any_staff", lang), callback_data="staff_any")]]
     for s in staff_list:
@@ -237,42 +258,38 @@ async def _show_staff_step(callback: CallbackQuery, state: FSMContext) -> None:
         t("choose_staff", lang),
         reply_markup=InlineKeyboardMarkup(inline_keyboard=rows),
     )
-    await callback.answer()
 
 
 @router.callback_query(F.data.startswith("svc_"))
 async def service_chosen(callback: CallbackQuery, state: FSMContext) -> None:
+    await callback.answer()
     lang = await _lang(state)
     try:
         service_id = int(callback.data.split("_", 1)[1])
     except ValueError:
-        await callback.answer()
         return
 
     data = await state.get_data()
     business_id = data.get("business_id")
     if not business_id:
-        await callback.answer()
         return
 
-    # Remember the chosen service's display name + price for the summary.
-    try:
-        services = await api_client.get_services(business_id)
-    except Exception:
-        services = []
-    svc = next((s for s in services if s["id"] == service_id), {})
+    # Name + price were already fetched in business_chosen and stashed in state —
+    # no need to re-pull the whole services list from the backend here.
+    meta = (data.get("services_meta") or {}).get(str(service_id), {})
     await state.update_data(
         service_id=service_id,
-        service_name=svc.get(f"name_{lang}") or svc.get("name_uz", "—"),
-        service_price=svc.get("price"),
+        service_name=meta.get("name") or "—",
+        service_price=meta.get("price"),
     )
 
-    await _show_staff_step(callback, state)
+    await _show_staff_step(callback, state, data=data)
 
 
 @router.callback_query(F.data == "choose_staff_back")
 async def choose_staff_back(callback: CallbackQuery, state: FSMContext) -> None:
     """Back from the date/time steps to staff selection."""
+    await callback.answer()
     await _show_staff_step(callback, state)
 
 
@@ -280,6 +297,7 @@ async def choose_staff_back(callback: CallbackQuery, state: FSMContext) -> None:
 
 @router.callback_query(F.data.startswith("staff_"))
 async def staff_chosen(callback: CallbackQuery, state: FSMContext) -> None:
+    await callback.answer()
     raw = callback.data.split("_", 1)[1]
     data = await state.get_data()
     lang = data.get("lang", "uz")
@@ -291,19 +309,18 @@ async def staff_chosen(callback: CallbackQuery, state: FSMContext) -> None:
         try:
             staff_id = int(raw)
         except ValueError:
-            await callback.answer()
             return
-        staff_name = data.get("staff_names", {}).get(raw, f"#{raw}")
+        staff_name = (data.get("staff_names") or {}).get(raw, f"#{raw}")
 
     await state.update_data(staff_id=staff_id, staff_name=staff_name)
     await callback.message.edit_text(t("choose_date", lang), reply_markup=date_keyboard(lang))
-    await callback.answer()
 
 
 # ── Date chosen → time slots ─────────────────────────────────────────────────
 
 @router.callback_query(F.data.startswith("date_"))
 async def date_chosen(callback: CallbackQuery, state: FSMContext) -> None:
+    await callback.answer()
     date_str = callback.data.split("_", 1)[1]
     await state.update_data(booking_date=date_str)
 
@@ -313,13 +330,12 @@ async def date_chosen(callback: CallbackQuery, state: FSMContext) -> None:
     service_id = data.get("service_id")
     staff_id = data.get("staff_id")
     if not business_id or not service_id:
-        await callback.answer()
         return
 
     try:
         slots = await api_client.get_available_slots(business_id, service_id, date_str, staff_id)
     except Exception:
-        await callback.answer(t("server_error", lang), show_alert=True)
+        await callback.message.answer(t("server_error", lang))
         return
 
     if not slots:
@@ -329,7 +345,6 @@ async def date_chosen(callback: CallbackQuery, state: FSMContext) -> None:
                 [InlineKeyboardButton(text=t("back", lang), callback_data="choose_staff_back")]
             ]),
         )
-        await callback.answer()
         return
 
     # 3 slot buttons per row — fewer scrolls on busy days.
@@ -350,20 +365,19 @@ async def date_chosen(callback: CallbackQuery, state: FSMContext) -> None:
         t("choose_time", lang),
         reply_markup=InlineKeyboardMarkup(inline_keyboard=rows),
     )
-    await callback.answer()
 
 
 # ── Time chosen → ask for phone ──────────────────────────────────────────────
 
 @router.callback_query(F.data.startswith("time_"))
 async def time_chosen(callback: CallbackQuery, state: FSMContext) -> None:
+    await callback.answer()
     start_time = callback.data.split("_", 1)[1]
     await state.update_data(start_time=start_time)
 
     lang = await _lang(state)
     await callback.message.edit_text(t("enter_phone", lang))
     await state.set_state(BookingFSM.entering_phone)
-    await callback.answer()
 
 
 # ── Phone entered → show summary ─────────────────────────────────────────────
@@ -410,6 +424,7 @@ async def phone_entered(message: Message, state: FSMContext) -> None:
 
 @router.callback_query(BookingFSM.confirming, F.data == "booking_confirm")
 async def booking_confirm(callback: CallbackQuery, state: FSMContext) -> None:
+    await callback.answer()
     data = await state.get_data()
     lang = data.get("lang", "uz")
 
@@ -445,4 +460,3 @@ async def booking_confirm(callback: CallbackQuery, state: FSMContext) -> None:
             [InlineKeyboardButton(text=t("main_menu", lang), callback_data="main_menu")]
         ]),
     )
-    await callback.answer()

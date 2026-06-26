@@ -27,11 +27,12 @@ async def main() -> None:
     storage = RedisStorage.from_url(
         REDIS_URL,
         connection_kwargs={
-            "socket_timeout": 5,          # a single op can't hang longer than 5s
-            "socket_connect_timeout": 5,  # nor can (re)connecting
-            "socket_keepalive": True,     # keep the TCP link warm between taps
-            "health_check_interval": 30,  # ping idle conns so stale ones get recycled
-            "retry_on_timeout": True,     # one automatic retry before surfacing an error
+            "socket_timeout": 3,           # cap a single op; healthy Singapore ops are tens of ms
+            "socket_connect_timeout": 5,   # (re)connecting can take a touch longer
+            "socket_keepalive": True,      # keep the TCP link warm at the kernel level between taps
+            "health_check_interval": 120,  # only PING-before-use a connection idle >2min, so warm
+                                           # taps never pay an extra round-trip (was 30s — too eager)
+            "retry_on_timeout": True,      # reconnect+retry once instead of surfacing a transient error
         },
     )
     bot = Bot(token=BOT_TOKEN, default=DefaultBotProperties(parse_mode=ParseMode.HTML))

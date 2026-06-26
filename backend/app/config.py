@@ -39,6 +39,13 @@ class Settings(BaseSettings):
     # Environment
     environment: Literal["development", "production"] = "development"
 
+    # Log every SQL statement (SQLAlchemy echo). Default OFF — echo renders +
+    # writes every statement to stdout synchronously on the event loop, which is
+    # real per-query latency in production. Set SQL_ECHO=true only for local
+    # debugging. (Kept independent of ENVIRONMENT so a missing/!=production env
+    # var can never silently turn this back on in prod.)
+    sql_echo: bool = False
+
     # Shared secret between bot and backend (BOT_SECRET in bot's .env)
     bot_secret: str = ""
 
