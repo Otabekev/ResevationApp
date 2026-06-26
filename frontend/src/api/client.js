@@ -43,6 +43,28 @@ async function refreshTokens() {
   return data.access_token;
 }
 
+// ── Transient-failure retry ──────────────────────────────────────────────────
+// The backend can be briefly unreachable through no fault of the request: a
+// Railway redeploy restart, a Neon Postgres cold-start after idle, or a momentary
+// network blip. Without a retry, that single hiccup bubbles straight up as a hard
+// "error, try again" screen. So we transparently retry SAFE (idempotent) reads a
+// few times with backoff before giving up — the user never sees the blip.
+const MAX_RETRIES = 3;
+const RETRY_BASE_MS = 600;
+
+function isIdempotent(config) {
+  const m = (config?.method || "get").toLowerCase();
+  return m === "get" || m === "head";
+}
+
+function isTransient(err) {
+  // No response at all = network error / timeout / connection refused (backend
+  // restarting, DNS/edge not ready). 502/503/504 = the edge has no healthy
+  // backend yet, or a gateway timeout. All of these recover on their own.
+  if (!err.response) return true;
+  return [502, 503, 504].includes(err.response.status);
+}
+
 api.interceptors.response.use(
   (res) => res,
   async (err) => {
@@ -62,6 +84,19 @@ api.interceptors.response.use(
         hardLogout();
       }
     }
+
+    // Retry transient backend unavailability (restart / cold-start / blip) on
+    // idempotent reads with backoff (0.6s, 1.2s, 1.8s) so a momentary failure
+    // doesn't surface as a hard error.
+    if (original && isIdempotent(original) && isTransient(err)) {
+      original._retryCount = original._retryCount || 0;
+      if (original._retryCount < MAX_RETRIES) {
+        original._retryCount += 1;
+        await new Promise((r) => setTimeout(r, RETRY_BASE_MS * original._retryCount));
+        return api(original);
+      }
+    }
+
     return Promise.reject(err);
   }
 );
