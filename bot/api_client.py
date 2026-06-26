@@ -8,14 +8,16 @@ from config import BACKEND_URL, BOT_SECRET
 # instead of doing a fresh handshake every time — that per-call handshake was
 # adding hundreds of ms to every step of the flow.
 #
-# keepalive_expiry drops idle connections after 30s so we never reuse one the
-# backend/proxy has already quietly closed (which would otherwise stall until the
-# read timeout). The structured timeout caps connect at 5s and any single call at
-# 10s, so a slow backend surfaces a clean error the handlers can show — never a
-# silent hang.
+# keepalive_expiry is 300s (not 30s) so the pooled connection survives realistic
+# think-time — a user routinely spends >30s reading a screen before tapping the
+# next step, and at 30s the pool would go empty and force a fresh TLS handshake on
+# that next call. httpx still transparently retries if the server closed the
+# socket, and the 10s read timeout bounds the worst case. The structured timeout
+# caps connect at 5s and any single call at 10s, so a slow backend surfaces a
+# clean error the handlers can show — never a silent hang.
 _client = httpx.AsyncClient(
     timeout=httpx.Timeout(10.0, connect=5.0),
-    limits=httpx.Limits(max_keepalive_connections=20, max_connections=100, keepalive_expiry=30.0),
+    limits=httpx.Limits(max_keepalive_connections=20, max_connections=100, keepalive_expiry=300.0),
 )
 
 
