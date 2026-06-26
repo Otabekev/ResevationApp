@@ -82,6 +82,7 @@ const translations = {
     // Dashboard
     today_remaining: "Bugun kutilmoqda",
     last_7_days: "7 kun",
+    pending_confirmation: "Tasdiqlashni kutmoqda",
     todays_schedule: "Bugungi jadval",
     no_bookings_today: "Bugun bronlar yo'q",
     no_bookings_today_sub: "Yangi bronlar shu yerda ko'rinadi",
@@ -386,6 +387,7 @@ const translations = {
 
     today_remaining: "Осталось сегодня",
     last_7_days: "7 дней",
+    pending_confirmation: "Ожидают подтверждения",
     todays_schedule: "Расписание на сегодня",
     no_bookings_today: "Сегодня записей нет",
     no_bookings_today_sub: "Новые записи появятся здесь",
@@ -678,6 +680,7 @@ const translations = {
 
     today_remaining: "Remaining today",
     last_7_days: "7 days",
+    pending_confirmation: "Awaiting confirmation",
     todays_schedule: "Today's schedule",
     no_bookings_today: "No bookings today",
     no_bookings_today_sub: "New bookings will appear here",
