@@ -193,9 +193,11 @@ async def on_location_shared(message: Message, state: FSMContext) -> None:
 
 @router.message(F.text == BOOK_CTA_TEXT)
 async def on_booking_cta(message: Message, state: FSMContext) -> None:
-    """The always-docked 'Bron qilish' button → jump straight into booking."""
-    from handlers import booking
-    await booking.start_booking_from_message(message, state)
+    """The always-docked 'Bron qilish' button → ask the language first (every
+    time, just like /start), then route into the booking flow once it's picked."""
+    lang = (await state.get_data()).get("lang", "uz")
+    await state.update_data(pending_action="book_flow")
+    await message.answer(t("choose_language", lang), reply_markup=language_keyboard())
 
 
 @router.callback_query(F.data.startswith("weblogin_"))
@@ -241,9 +243,17 @@ async def set_language(callback: CallbackQuery, state: FSMContext) -> None:
         except Exception:
             pass  # cosmetic — the FSM language is already updated
 
-    # If the user arrived via a booking deep-link, continue to that business's
-    # card; otherwise drop them on the main menu.
-    if data.get("pending_action") == "book" and data.get("business_id"):
+    # Route on after the language pick: launch button → category list; booking
+    # deep-link → that business's card; otherwise → the main menu.
+    if data.get("pending_action") == "book_flow":
+        await state.update_data(pending_action=None)
+        from handlers import booking
+        text, kb = await booking._categories_view(new_lang)
+        await callback.message.edit_text(
+            text if text is not None else t("server_error", new_lang),
+            reply_markup=kb,
+        )
+    elif data.get("pending_action") == "book" and data.get("business_id"):
         await state.update_data(pending_action=None)
         biz_id = data["business_id"]
         rows = [[InlineKeyboardButton(text=t("book_appointment", new_lang), callback_data=f"biz_{biz_id}")]]
