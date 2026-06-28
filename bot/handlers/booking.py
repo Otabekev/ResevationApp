@@ -219,6 +219,13 @@ async def business_chosen(callback: CallbackQuery, state: FSMContext) -> None:
     data = await state.get_data()
     back_cb = f"cat_{data['category_id']}" if data.get("category_id") else "book_start"
     kb = paginate_buttons(services, "svc_", "id", svc_label, lang, back_cb=back_cb)
+    # If this business has a location set, offer a "📍 view location" button (above
+    # the Back row) so the customer can check directions before booking.
+    if biz.get("latitude") is not None and biz.get("longitude") is not None:
+        kb.inline_keyboard.insert(
+            len(kb.inline_keyboard) - 1,
+            [InlineKeyboardButton(text=t("view_location", lang), callback_data=f"loc_{business_id}")],
+        )
     await callback.message.edit_text(t("choose_service", lang), reply_markup=kb)
 
 

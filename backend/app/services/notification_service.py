@@ -39,6 +39,23 @@ async def send_telegram_message(
         return False
 
 
+async def send_telegram_location(chat_id: int, latitude: float, longitude: float) -> bool:
+    """Sends a native Telegram map pin (tap it → directions in the user's maps
+    app). Best-effort: returns True on success, never raises. Callers should only
+    invoke this when the business actually has coordinates."""
+    if not settings.telegram_bot_token:
+        return False
+    try:
+        async with httpx.AsyncClient(timeout=10) as client:
+            resp = await client.post(
+                f"{BOT_API_BASE}/sendLocation",
+                json={"chat_id": chat_id, "latitude": latitude, "longitude": longitude},
+            )
+            return resp.status_code == 200
+    except Exception:
+        return False
+
+
 def booking_confirmed_message(
     lang: str,
     business_name: str,
