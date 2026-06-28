@@ -19,6 +19,7 @@ from app.services.notification_service import (
     booking_cancelled_message,
     new_booking_alert_message,
     review_prompt_message,
+    send_telegram_location,
     send_telegram_message,
 )
 
@@ -213,6 +214,11 @@ async def create_public_booking(
         ),
     )
 
+    # Send the business map pin alongside the confirmation so the customer can
+    # find the place (best-effort; only when the business has coordinates).
+    if business.latitude is not None and business.longitude is not None:
+        await send_telegram_location(customer.telegram_id, business.latitude, business.longitude)
+
     await _notify_business_side(db, booking, business, names)
 
     return booking
@@ -391,6 +397,8 @@ async def update_booking_status(
                 time_str=booking.start_time.strftime("%H:%M"),
             ),
         )
+        if business and business.latitude is not None and business.longitude is not None:
+            await send_telegram_location(customer.telegram_id, business.latitude, business.longitude)
 
     # Send review prompt to customer when booking is completed
     if body.status == "completed" and customer and customer.telegram_id:

@@ -20,7 +20,11 @@ from app.database import AsyncSessionLocal
 from app.models.booking import Booking, Customer, Notification
 from app.models.business import Business
 from app.models.service import Service
-from app.services.notification_service import booking_reminder_message, send_telegram_message
+from app.services.notification_service import (
+    booking_reminder_message,
+    send_telegram_location,
+    send_telegram_message,
+)
 from app.timeutils import to_utc
 
 logger = logging.getLogger("rezerv.scheduler")
@@ -97,6 +101,17 @@ async def _send_reminders() -> None:
                     )
 
                     success = await send_telegram_message(customer.telegram_id, text)
+
+                    # On the 1-hour reminder (read right before heading out), also
+                    # drop the business map pin for one-tap directions.
+                    if (
+                        hours_until == 1
+                        and business.latitude is not None
+                        and business.longitude is not None
+                    ):
+                        await send_telegram_location(
+                            customer.telegram_id, business.latitude, business.longitude
+                        )
 
                     db.add(
                         Notification(
