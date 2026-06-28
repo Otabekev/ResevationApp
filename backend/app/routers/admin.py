@@ -1,10 +1,13 @@
+import time
 from datetime import date, datetime
 
 from fastapi import APIRouter, Depends, HTTPException, Query
+from fastapi.responses import JSONResponse
 from pydantic import BaseModel
 from sqlalchemy import desc, func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.config import settings
 from app.database import get_db
 from app.deps import get_current_super_admin
 from app.models.booking import Booking, Customer
@@ -337,3 +340,69 @@ async def get_recent_activity(
         "recent_businesses": recent_businesses,
         "recent_bookings": recent_bookings,
     }
+
+
+# ── Investor growth-map feed (secret-gated, cached) ──────────────────────────
+# Powers the standalone investor map (QN_Investor). Gated by GROWTH_SECRET (NOT
+# the admin JWT) so the static site can read it with a token; disabled (403)
+# until GROWTH_SECRET is set. Cached in-process to keep it off the booking hot
+# path, and it sets its own permissive CORS header (it's already secret-gated)
+# so the static investor site can fetch it without any allowed-origins juggling.
+
+_growth_cache: dict = {"at": 0.0, "data": None}
+_GROWTH_TTL = 600.0  # seconds
+
+
+@router.get("/growth")
+async def growth_map(secret: str = Query(""), db: AsyncSession = Depends(get_db)):
+    if not settings.growth_secret or secret != settings.growth_secret:
+        raise HTTPException(status_code=403, detail="Forbidden")
+
+    now = time.monotonic()
+    cached = _growth_cache["data"]
+    if cached is None or (now - _growth_cache["at"]) >= _GROWTH_TTL:
+        rows = (
+            await db.execute(
+                select(Business, BusinessCategory.name_en)
+                .join(BusinessCategory, BusinessCategory.id == Business.category_id, isouter=True)
+                .where(
+                    Business.latitude.is_not(None),
+                    Business.longitude.is_not(None),
+                    ~Business.status.in_(["blocked", "suspended"]),
+                )
+                .order_by(Business.created_at)
+            )
+        ).all()
+
+        # Week 1 = the earliest located business; everyone else is weeks-after that.
+        earliest = None
+        for b, _name in rows:
+            if b.created_at and (earliest is None or b.created_at < earliest):
+                earliest = b.created_at
+
+        items = []
+        for b, cat_name in rows:
+            if b.created_at and earliest:
+                week = (b.created_at.date() - earliest.date()).days // 7 + 1
+            else:
+                week = 1
+            items.append({
+                "id": b.id,
+                "name": b.name,
+                "lat": b.latitude,
+                "lng": b.longitude,
+                "category": cat_name or "Other",
+                "district": b.district or b.region or "",
+                "status": b.status,
+                "week": week,
+                "joined": b.created_at.date().isoformat() if b.created_at else None,
+            })
+
+        cached = {"businesses": items, "max_week": max((i["week"] for i in items), default=1)}
+        _growth_cache["data"] = cached
+        _growth_cache["at"] = now
+
+    return JSONResponse(
+        content=cached,
+        headers={"Access-Control-Allow-Origin": "*", "Cache-Control": "public, max-age=300"},
+    )

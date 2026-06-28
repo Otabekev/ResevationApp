@@ -49,6 +49,10 @@ class Settings(BaseSettings):
     # Shared secret between bot and backend (BOT_SECRET in bot's .env)
     bot_secret: str = ""
 
+    # Secret that gates the investor growth-map feed (GET /admin/growth?secret=…).
+    # Unset by default → the endpoint is disabled (403) until GROWTH_SECRET is set.
+    growth_secret: str = ""
+
     @property
     def super_admin_ids(self) -> list[int]:
         return [int(x.strip()) for x in self.super_admin_telegram_ids.split(",") if x.strip()]
