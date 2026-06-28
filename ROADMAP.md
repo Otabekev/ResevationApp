@@ -7,6 +7,21 @@ Things to tackle later. Newest ideas near the top of **Backlog**.
   Uzbekistan with a week-by-week growth timeline. Phase 1 (real data feed via
   `GET /admin/growth`) is wired up.
 
+## 🚀 Launch & growth tactics
+
+### Soft-launch dinner (launch day)
+A free dinner for **20 restaurant owners** on launch day — show the app, let them
+play with it, win them over in person.
+
+- **Goal: 10 of the 20 sign up by the end of the night** (50% conversion).
+- Show the app live, then let them **play with it hands-on** at the table.
+- **Onboard on the spot** — help each interested owner set up their business +
+  first service + working hours right there, so they leave already live.
+- **A reason to act tonight** — a launch-night perk (extended free trial,
+  featured placement, "founding business" badge) so they sign up now, not "later."
+- Prep: confirmed guest list of 20, venue + dinner, a tight 5-min demo, a couple
+  of helpers for on-the-spot onboarding, and printed copies of the sales guide.
+
 ## 📋 Backlog — tackle later
 
 ### Reduce churn: let us schedule calls with business owners
