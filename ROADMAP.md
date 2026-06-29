@@ -57,6 +57,17 @@ Today there's no streamlined way; arranging a call is manual back-and-forth.
 
 **Payoff:** retention. Reaching owners early is what stops churn.
 
+### Broadcast tool — later upgrades
+The super-admin broadcast (now/scheduled; everyone / owners+staff / customers)
+ships v1 as a background sender with delivery counters. Revisit when volume grows:
+- **Resumable outbox** — per-recipient rows so a mid-send restart resumes, instead
+  of relying on one background task (fine while sends are hundreds, not thousands).
+- **Customer opt-out** — a way for customers to stop marketing messages (Telegram
+  can ban a bot if mass messages get reported). Owner/staff + launch news is fine;
+  add opt-out before frequent customer promos.
+- **Per-language variants** — currently one message for all; add uz/ru/en versions
+  delivered by each user's language if customer marketing needs it.
+
 ### Investor growth map — later phases
 - **Phase 2:** growth-curve chart + bookings traction (total + per week) +
   momentum % (week-over-week) + retention (active vs churned).
