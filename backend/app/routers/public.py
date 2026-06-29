@@ -6,11 +6,55 @@ from fastapi import APIRouter, Depends, Query
 from sqlalchemy import and_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.config import settings
 from app.database import get_db
 from app.models.business import Business
 from app.models.staff import Staff, StaffService
+from app.models.user import User
 
 router = APIRouter(prefix="/public", tags=["public"])
+
+
+@router.get("/launch-status")
+async def launch_status(
+    telegram_id: int | None = Query(None),
+    db: AsyncSession = Depends(get_db),
+):
+    """Pre-launch gate for the bot's booking flow.
+
+    Returns ``{"open": bool, "launched": bool}``:
+      - ``launched`` — the public launch date has arrived (or none is configured).
+        User-independent; the bot caches this so the gate is a no-op after launch.
+      - ``open`` — may THIS user enter the booking flow. Always true once launched;
+        before launch only business owners/staff (testing during onboarding) get in.
+    """
+    if settings.has_launched:
+        return {"open": True, "launched": True}
+
+    # Pre-launch: only business owners/staff may proceed.
+    if telegram_id is None:
+        return {"open": False, "launched": False}
+
+    user = (
+        await db.execute(select(User).where(User.telegram_id == telegram_id))
+    ).scalar_one_or_none()
+    if user is None:
+        return {"open": False, "launched": False}
+
+    owns = (
+        await db.execute(select(Business.id).where(Business.owner_id == user.id).limit(1))
+    ).first() is not None
+    is_staff = False
+    if not owns:
+        is_staff = (
+            await db.execute(
+                select(Staff.id)
+                .where(and_(Staff.user_id == user.id, Staff.is_active == True))
+                .limit(1)
+            )
+        ).first() is not None
+
+    return {"open": owns or is_staff, "launched": False}
 
 
 @router.get("/businesses")

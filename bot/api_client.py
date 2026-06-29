@@ -115,6 +115,18 @@ async def get_staff(business_id: int) -> list[dict]:
     return resp.json()
 
 
+async def get_launch_status(telegram_id: int) -> dict:
+    """Ask the backend whether the booking flow is open for this user (pre-launch
+    gate). Returns {"open": bool, "launched": bool}: owners/staff are always open;
+    everyone else only once the launch date has passed."""
+    resp = await _client.get(
+        f"{BACKEND_URL}/public/launch-status",
+        params={"telegram_id": telegram_id},
+    )
+    resp.raise_for_status()
+    return resp.json()
+
+
 async def get_available_slots(
     business_id: int, service_id: int, date_str: str, staff_id: int | None = None
 ) -> list[dict]:

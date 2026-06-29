@@ -251,6 +251,10 @@ async def set_language(callback: CallbackQuery, state: FSMContext) -> None:
     if data.get("pending_action") == "book_flow":
         await state.update_data(pending_action=None)
         from handlers import booking
+        if not await booking._booking_open(callback.from_user.id):
+            await callback.message.edit_text(t("prelaunch_wait", new_lang))
+            await callback.answer()
+            return
         text, kb = await booking._categories_view(new_lang)
         await callback.message.edit_text(
             text if text is not None else t("server_error", new_lang),
@@ -258,6 +262,11 @@ async def set_language(callback: CallbackQuery, state: FSMContext) -> None:
         )
     elif data.get("pending_action") == "book" and data.get("business_id"):
         await state.update_data(pending_action=None)
+        from handlers import booking
+        if not await booking._booking_open(callback.from_user.id):
+            await callback.message.edit_text(t("prelaunch_wait", new_lang))
+            await callback.answer()
+            return
         biz_id = data["business_id"]
         rows = [[InlineKeyboardButton(text=t("book_appointment", new_lang), callback_data=f"biz_{biz_id}")]]
         if data.get("business_has_location"):
