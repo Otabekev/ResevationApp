@@ -25,6 +25,7 @@ const translations = {
     platform: "Platforma",
     language: "Til",
     logout: "Chiqish",
+    refresh: "Yangilash",
 
     // Common
     today: "Bugun",
@@ -365,6 +366,7 @@ const translations = {
     platform: "Платформа",
     language: "Язык",
     logout: "Выйти",
+    refresh: "Обновить",
 
     today: "Сегодня",
     save: "Сохранить",
@@ -689,6 +691,7 @@ const translations = {
     platform: "Platform",
     language: "Language",
     logout: "Log out",
+    refresh: "Refresh",
 
     today: "Today",
     save: "Save",

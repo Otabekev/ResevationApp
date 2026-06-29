@@ -7,7 +7,9 @@ import BrandMark from "./BrandMark";
 import {
   IconHome, IconCalendar, IconScissors, IconUsers, IconClock, IconChart,
   IconSettings, IconShield, IconChevronDown, IconLogout, IconGlobe, IconCheck, IconSend,
+  IconRefresh,
 } from "./icons";
+import { refreshApp } from "../pwa";
 
 const NAV_ITEMS = [
   { path: "/", Icon: IconHome, key: "dashboard", mobile: true },
@@ -111,9 +113,19 @@ function UserMenu() {
   const ref = useRef(null);
   useClickOutside(ref, () => setOpen(false));
 
+  const [refreshing, setRefreshing] = useState(false);
+
   const changeLang = (code) => {
     setLang(code);
     updateMyLanguage(code).catch(() => {}); // persist server-side; cosmetic if it fails
+  };
+
+  const handleRefresh = () => {
+    // Installed PWAs have no browser reload button — this reloads (and pulls the
+    // latest app version). The page reloads, so this state is just to block a
+    // double-tap in the moment before it does.
+    setRefreshing(true);
+    refreshApp();
   };
 
   const handleLogout = () => {
@@ -140,6 +152,17 @@ function UserMenu() {
             <div style={{ fontWeight: 750, fontSize: "var(--text-sm)" }} className="ellipsis">{user?.name}</div>
             <div style={{ fontSize: "var(--text-xs)", color: "var(--gray-500)" }}>{t(`role_${user?.role}`) || user?.role}</div>
           </div>
+          <div className="menu-divider" />
+          <button
+            type="button"
+            role="menuitem"
+            className="menu-item"
+            onClick={handleRefresh}
+            disabled={refreshing}
+          >
+            <IconRefresh size={16} />
+            {refreshing ? t("loading") : t("refresh")}
+          </button>
           <div className="menu-divider" />
           <div className="menu-label" style={{ display: "flex", alignItems: "center", gap: 6 }}>
             <IconGlobe size={13} /> {t("language")}
