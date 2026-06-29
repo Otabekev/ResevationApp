@@ -90,6 +90,34 @@ async def _lang(state: FSMContext) -> str:
     return (await state.get_data()).get("lang", "uz")
 
 
+def _multiselect_kb(
+    ms_list: list[dict], selected: list[int], lang: str, back_cb: str,
+    business_id: int, has_location: bool = False,
+) -> InlineKeyboardMarkup:
+    """Checklist of services (✅/⬜) + a Continue button with a running total.
+    Used when a business allows booking several services in one appointment."""
+    sel = set(selected)
+    rows = []
+    for s in ms_list:
+        mark = "✅" if s["id"] in sel else "⬜"
+        price = s.get("price")
+        price_str = f" • {t('price_uzs', lang, amount=f'{int(float(price)):,}')}" if price else ""
+        rows.append([InlineKeyboardButton(
+            text=f"{mark} {s['name']} ({s['dur']} {t('min_suffix', lang)}){price_str}",
+            callback_data=f"msvc_{s['id']}",
+        )])
+    # Continue row shows count + summed duration once something is picked.
+    cont = t("svc_continue", lang)
+    if sel:
+        total = sum(s["dur"] for s in ms_list if s["id"] in sel)
+        cont += f" · {len(sel)} · {total} {t('min_suffix', lang)}"
+    rows.append([InlineKeyboardButton(text=cont, callback_data="svcdone")])
+    if has_location:
+        rows.append([InlineKeyboardButton(text=t("view_location", lang), callback_data=f"loc_{business_id}")])
+    rows.append([InlineKeyboardButton(text=t("back", lang), callback_data=back_cb)])
+    return InlineKeyboardMarkup(inline_keyboard=rows)
+
+
 # ── Pre-launch gate ───────────────────────────────────────────────────────────
 # Until launch day the booking flow is closed to the public: business owners and
 # staff can test freely (so they get the feel of it during onboarding), everyone
@@ -221,17 +249,28 @@ async def business_chosen(callback: CallbackQuery, state: FSMContext) -> None:
         await callback.message.answer(t("server_error", lang))
         return
 
-    # Stash each service's display name + price so the "service chosen" step can
-    # read them from state instead of re-fetching the whole list. Reset any
-    # staff cache from a previously-viewed business.
+    # Stash each service's display name + price + duration so later steps read
+    # them from state instead of re-fetching. Reset staff cache + any multi-select
+    # draft carried over from a previously-viewed business.
+    has_location = biz.get("latitude") is not None and biz.get("longitude") is not None
+    allow_multi = bool(biz.get("allow_multi_service"))
     services_meta = {
-        str(s["id"]): {"name": s.get(f"name_{lang}") or s.get("name_uz", ""), "price": s.get("price")}
+        str(s["id"]): {
+            "name": s.get(f"name_{lang}") or s.get("name_uz", ""),
+            "price": s.get("price"),
+            "duration": s.get("duration_minutes", 0),
+        }
         for s in services
     }
     await state.update_data(
         business_id=business_id,
         business_name=biz.get("name", "—"),
         services_meta=services_meta,
+        allow_multi=allow_multi,
+        biz_has_location=has_location,
+        selected_services=[],
+        service_ids=None,
+        ms_list=None,
         staff_cache=None,
         staff_names=None,
     )
@@ -245,6 +284,28 @@ async def business_chosen(callback: CallbackQuery, state: FSMContext) -> None:
         )
         return
 
+    data = await state.get_data()
+    back_cb = f"cat_{data['category_id']}" if data.get("category_id") else "book_start"
+
+    # Multi-service businesses get a ✅/⬜ checklist (pick several, book one block);
+    # everyone else keeps the classic one-tap service list.
+    if allow_multi:
+        ms_list = [
+            {
+                "id": s["id"],
+                "name": s.get(f"name_{lang}") or s.get("name_uz", ""),
+                "dur": s.get("duration_minutes", 0),
+                "price": s.get("price"),
+            }
+            for s in services
+        ]
+        await state.update_data(ms_list=ms_list)
+        await callback.message.edit_text(
+            t("choose_services_multi", lang),
+            reply_markup=_multiselect_kb(ms_list, [], lang, back_cb, business_id, has_location),
+        )
+        return
+
     def svc_label(s):
         name = s.get(f"name_{lang}") or s.get("name_uz", "")
         duration = s.get("duration_minutes", 0)
@@ -252,12 +313,10 @@ async def business_chosen(callback: CallbackQuery, state: FSMContext) -> None:
         price_str = f" • {t('price_uzs', lang, amount=f'{int(float(price)):,}')}" if price else ""
         return f"{name} ({duration} {t('min_suffix', lang)}){price_str}"
 
-    data = await state.get_data()
-    back_cb = f"cat_{data['category_id']}" if data.get("category_id") else "book_start"
     kb = paginate_buttons(services, "svc_", "id", svc_label, lang, back_cb=back_cb)
     # If this business has a location set, offer a "📍 view location" button (above
     # the Back row) so the customer can check directions before booking.
-    if biz.get("latitude") is not None and biz.get("longitude") is not None:
+    if has_location:
         kb.inline_keyboard.insert(
             len(kb.inline_keyboard) - 1,
             [InlineKeyboardButton(text=t("view_location", lang), callback_data=f"loc_{business_id}")],
@@ -292,6 +351,13 @@ async def _show_staff_step(callback: CallbackQuery, state: FSMContext, data: dic
                 staff_cache=staff_list,
                 staff_names={str(s["id"]): s["name"] for s in staff_list},
             )
+
+    # For a multi-service selection, only offer staff who can do EVERY chosen
+    # service (the backend enforces this too; this just keeps the list honest).
+    selected = data.get("selected_services")
+    if selected:
+        need = set(selected)
+        staff_list = [s for s in staff_list if need.issubset(set(s.get("service_ids") or []))]
 
     rows = [[InlineKeyboardButton(text=t("any_staff", lang), callback_data="staff_any")]]
     for s in staff_list:
@@ -328,6 +394,58 @@ async def service_chosen(callback: CallbackQuery, state: FSMContext) -> None:
     )
 
     await _show_staff_step(callback, state, data=data)
+
+
+# ── Multi-service: toggle a service in/out of the selection ──────────────────
+
+@router.callback_query(F.data.startswith("msvc_"))
+async def multi_service_toggle(callback: CallbackQuery, state: FSMContext) -> None:
+    await callback.answer()
+    try:
+        sid = int(callback.data.split("_", 1)[1])
+    except ValueError:
+        return
+    data = await state.get_data()
+    lang = data.get("lang", "uz")
+    ms_list = data.get("ms_list") or []
+    selected = list(data.get("selected_services") or [])
+    if sid in selected:
+        selected.remove(sid)
+    elif any(s["id"] == sid for s in ms_list):
+        selected.append(sid)
+    await state.update_data(selected_services=selected)
+
+    back_cb = f"cat_{data['category_id']}" if data.get("category_id") else "book_start"
+    kb = _multiselect_kb(
+        ms_list, selected, lang, back_cb, data.get("business_id"), data.get("biz_has_location", False)
+    )
+    try:
+        await callback.message.edit_reply_markup(reply_markup=kb)
+    except Exception:
+        pass  # "message is not modified" / transient — ignore
+
+
+@router.callback_query(F.data == "svcdone")
+async def multi_service_done(callback: CallbackQuery, state: FSMContext) -> None:
+    """Finish the multi-select → set the combined booking draft and go to staff."""
+    data = await state.get_data()
+    lang = data.get("lang", "uz")
+    selected = list(data.get("selected_services") or [])
+    if not selected:
+        await callback.answer(t("pick_at_least_one", lang), show_alert=True)
+        return
+    await callback.answer()
+
+    by_id = {s["id"]: s for s in (data.get("ms_list") or [])}
+    names = [by_id[sid]["name"] for sid in selected if sid in by_id]
+    prices = [float(by_id[sid]["price"]) for sid in selected if sid in by_id and by_id[sid].get("price")]
+    await state.update_data(
+        service_id=selected[0],          # primary service (back-compat)
+        service_ids=selected,            # full back-to-back set
+        service_name=", ".join(names) if names else "—",
+        service_price=sum(prices) if prices else None,
+    )
+    await _show_staff_step(callback, state)
 
 
 @router.callback_query(F.data == "choose_staff_back")
@@ -372,12 +490,15 @@ async def date_chosen(callback: CallbackQuery, state: FSMContext) -> None:
     lang = data.get("lang", "uz")
     business_id = data.get("business_id")
     service_id = data.get("service_id")
+    service_ids = data.get("service_ids")
     staff_id = data.get("staff_id")
     if not business_id or not service_id:
         return
 
     try:
-        slots = await api_client.get_available_slots(business_id, service_id, date_str, staff_id)
+        slots = await api_client.get_available_slots(
+            business_id, service_id, date_str, staff_id, service_ids=service_ids
+        )
     except Exception:
         await callback.message.answer(t("server_error", lang))
         return
@@ -505,6 +626,7 @@ async def booking_confirm(callback: CallbackQuery, state: FSMContext) -> None:
         await api_client.create_booking({
             "business_id": data["business_id"],
             "service_id": data["service_id"],
+            "service_ids": data.get("service_ids"),
             "staff_id": data.get("staff_id"),
             "booking_date": data["booking_date"],
             "start_time": data["start_time"] + ":00",
@@ -525,6 +647,7 @@ async def booking_confirm(callback: CallbackQuery, state: FSMContext) -> None:
     await state.update_data(
         booking_date=None, start_time=None, service_id=None, staff_id=None,
         service_name=None, staff_name=None, service_price=None,
+        service_ids=None, selected_services=[],
     )
 
     await callback.message.edit_text(

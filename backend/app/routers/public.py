@@ -92,4 +92,17 @@ async def list_public_staff(business_id: int, db: AsyncSession = Depends(get_db)
         select(Staff).where(and_(Staff.business_id == business_id, Staff.is_active == True))
     )
     staff_list = result.scalars().all()
-    return [{"id": s.id, "name": s.name} for s in staff_list]
+
+    # Attach each staff member's service ids so the bot can pre-filter to staff
+    # who can perform a multi-service selection (one batched query, no N+1).
+    by_staff: dict[int, list[int]] = {}
+    if staff_list:
+        links = await db.execute(
+            select(StaffService.staff_id, StaffService.service_id).where(
+                StaffService.staff_id.in_([s.id for s in staff_list])
+            )
+        )
+        for sid, svc_id in links.all():
+            by_staff.setdefault(sid, []).append(svc_id)
+
+    return [{"id": s.id, "name": s.name, "service_ids": by_staff.get(s.id, [])} for s in staff_list]

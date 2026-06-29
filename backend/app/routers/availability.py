@@ -25,11 +25,16 @@ async def get_slots(
     service_id: int = Query(...),
     date: date = Query(...),
     staff_id: int | None = Query(None),
+    service_ids: list[int] | None = Query(None),
     db: AsyncSession = Depends(get_db),
 ) -> list[SlotOut]:
     """
     Returns available time slots for a given service on a given date.
     Public endpoint — used by the Telegram bot and Mini App booking flow.
+
+    Pass repeated `service_ids` (e.g. ?service_ids=1&service_ids=2) to size slots
+    for several services booked back-to-back as one block. Omit it for a single
+    service (the `service_id` param). The engine treats one id identically.
     """
     slots = await get_available_slots(
         db=db,
@@ -37,6 +42,7 @@ async def get_slots(
         service_id=service_id,
         target_date=date,
         staff_id=staff_id,
+        service_ids=service_ids,
     )
     return [
         SlotOut(
