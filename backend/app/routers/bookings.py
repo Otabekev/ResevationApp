@@ -491,7 +491,7 @@ async def cancel_booking(
 
 # ── Customer: own bookings ────────────────────────────────────────────────────
 
-@router.get("/customers/{telegram_id}/bookings", response_model=list[BookingOut])
+@router.get("/customers/{telegram_id}/bookings", response_model=None)
 async def get_customer_bookings(
     telegram_id: int,
     upcoming_only: bool = Query(False),
@@ -505,8 +505,9 @@ async def get_customer_bookings(
         raise HTTPException(status_code=403, detail="Forbidden")
 
     from datetime import date as date_type
-    customer_result = await db.execute(select(Customer).where(Customer.telegram_id == telegram_id))
-    customer = customer_result.scalar_one_or_none()
+    customer = (
+        await db.execute(select(Customer).where(Customer.telegram_id == telegram_id))
+    ).scalar_one_or_none()
     if not customer:
         return []
 
@@ -520,7 +521,35 @@ async def get_customer_bookings(
         if upcoming_only
         else (Booking.booking_date.desc(), Booking.start_time.desc())
     )
-    result = await db.execute(
-        select(Booking).where(and_(*filters)).order_by(*order).limit(limit)
+    # Join business + service so the customer's bookings list can show WHICH
+    # business and service each one is for (no N+1 in the bot).
+    rows = await db.execute(
+        select(Booking, Business.name, Service.name_uz, Service.name_ru, Service.name_en)
+        .join(Business, Business.id == Booking.business_id, isouter=True)
+        .join(Service, Service.id == Booking.service_id, isouter=True)
+        .where(and_(*filters))
+        .order_by(*order)
+        .limit(limit)
     )
-    return result.scalars().all()
+    out: list[dict] = []
+    for b, biz_name, svc_uz, svc_ru, svc_en in rows.all():
+        out.append({
+            "id": b.id,
+            "business_id": b.business_id,
+            "service_id": b.service_id,
+            "staff_id": b.staff_id,
+            "customer_id": b.customer_id,
+            "customer_name": b.customer_name,
+            "customer_phone": b.customer_phone,
+            "booking_date": b.booking_date.isoformat() if b.booking_date else None,
+            "start_time": b.start_time.isoformat() if b.start_time else None,
+            "end_time": b.end_time.isoformat() if b.end_time else None,
+            "status": b.status,
+            "notes": b.notes,
+            "was_auto_assigned": b.was_auto_assigned,
+            "business_name": biz_name,
+            "service_name_uz": svc_uz,
+            "service_name_ru": svc_ru,
+            "service_name_en": svc_en,
+        })
+    return out
