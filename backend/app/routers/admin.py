@@ -207,7 +207,7 @@ def _booking_row(b: Booking, business_name: str | None, service_name: str | None
         "service_name": service_name,
         "customer_name": b.customer_name,
         "booking_date": b.booking_date.isoformat() if b.booking_date else None,
-        "booking_time": b.booking_time.isoformat() if b.booking_time else None,
+        "booking_time": b.start_time.isoformat() if b.start_time else None,
         "status": b.status,
         "created_at": b.created_at.isoformat() if b.created_at else None,
     }
