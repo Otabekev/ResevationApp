@@ -2,7 +2,19 @@
 
 Things to tackle later. Newest ideas near the top of **Backlog**.
 
+## ⚠️ Before launch — DO BEFORE 2026-07-20
+- **Clear out test bookings.** During pre-launch, owners & staff can use the bot
+  to try the full flow (see *Pre-launch gate* below). Every test booking is a
+  **real row** with a real "new booking" ping to staff — harmless, but it piles
+  up dummy data. **Right before July 20, wipe the test bookings** so launch starts
+  clean. Nothing to build; just a cleanup pass.
+  _(Claude: surface this reminder in any session as the date nears.)_
+
 ## 🔜 In progress
+- **Pre-launch gate** — until 2026-07-20 the bot's customer booking flow is gated:
+  business **owners & staff pass through and can test freely**; everyone else sees
+  a "we open July 20th" message. Auto-opens on the launch date (date-based, no
+  redeploy). Web dashboard stays fully open so owners can set up.
 - **Investor growth map** (separate `QN_Investor` project) — interactive map of
   Uzbekistan with a week-by-week growth timeline. Phase 1 (real data feed via
   `GET /admin/growth`) is wired up.

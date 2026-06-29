@@ -90,6 +90,34 @@ async def _lang(state: FSMContext) -> str:
     return (await state.get_data()).get("lang", "uz")
 
 
+# ── Pre-launch gate ───────────────────────────────────────────────────────────
+# Until launch day the booking flow is closed to the public: business owners and
+# staff can test freely (so they get the feel of it during onboarding), everyone
+# else sees a friendly "opening soon" notice. The backend is the single source of
+# truth (LAUNCH_DATE + an owner/staff lookup) — we don't trust the bot's cached
+# role, which can be stale for an owner who just registered. Once the backend
+# reports the platform has launched we remember it for the whole process, so the
+# gate becomes a true no-op (zero backend calls per tap) from launch day on.
+_launched = False
+
+
+async def _booking_open(telegram_id: int) -> bool:
+    """True if this user may enter the booking flow. Owners/staff always pass;
+    everyone else passes only once the launch date has arrived. Fails OPEN on any
+    backend error so a transient blip never blocks a real owner mid-demo."""
+    global _launched
+    if _launched:
+        return True
+    try:
+        status = await api_client.get_launch_status(telegram_id)
+    except Exception:
+        return True  # best-effort gate — never hard-block on a network hiccup
+    if status.get("launched"):
+        _launched = True  # platform is public now → stop calling for everyone
+        return True
+    return bool(status.get("open"))
+
+
 # ── Start booking ─────────────────────────────────────────────────────────────
 
 async def _categories_view(lang: str):
@@ -125,6 +153,9 @@ async def start_booking_from_message(message: Message, state: FSMContext) -> Non
 async def book_start(callback: CallbackQuery, state: FSMContext) -> None:
     await callback.answer()  # clear the Telegram spinner up front so the button never looks frozen
     lang = await _lang(state)
+    if not await _booking_open(callback.from_user.id):
+        await callback.message.edit_text(t("prelaunch_wait", lang))
+        return
     text, kb = await _categories_view(lang)
     if text is None:
         await callback.message.answer(t("server_error", lang))
@@ -169,6 +200,11 @@ async def category_chosen(callback: CallbackQuery, state: FSMContext) -> None:
 async def business_chosen(callback: CallbackQuery, state: FSMContext) -> None:
     await callback.answer()
     lang = await _lang(state)
+    # Backstop gate — covers any path that reaches a concrete business (incl. the
+    # deep-link card) even if an entry point above is ever missed. No-op after launch.
+    if not await _booking_open(callback.from_user.id):
+        await callback.message.edit_text(t("prelaunch_wait", lang))
+        return
     try:
         business_id = int(callback.data.split("_", 1)[1])
     except ValueError:

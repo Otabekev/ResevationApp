@@ -1,7 +1,13 @@
+from datetime import date, datetime, timedelta, timezone
 from functools import lru_cache
 from typing import Literal
 
 from pydantic_settings import BaseSettings, SettingsConfigDict
+
+# Uzbekistan is UTC+5 year-round (no daylight saving). A fixed offset keeps the
+# launch-date check correct without depending on the system tz database (tzdata)
+# being present inside the container.
+_UZ_TZ = timezone(timedelta(hours=5))
 
 
 class Settings(BaseSettings):
@@ -53,9 +59,29 @@ class Settings(BaseSettings):
     # Unset by default → the endpoint is disabled (403) until GROWTH_SECRET is set.
     growth_secret: str = ""
 
+    # ISO date (YYYY-MM-DD) the platform opens to the public. Before it, the bot's
+    # booking flow is closed to everyone EXCEPT business owners/staff (who test
+    # during onboarding). Blank/unset → already open (no gate). Set LAUNCH_DATE on
+    # the server; the gate auto-opens on that date — no redeploy needed.
+    launch_date: str = ""
+
     @property
     def super_admin_ids(self) -> list[int]:
         return [int(x.strip()) for x in self.super_admin_telegram_ids.split(",") if x.strip()]
+
+    @property
+    def launch_date_value(self) -> date | None:
+        try:
+            return date.fromisoformat(self.launch_date) if self.launch_date else None
+        except ValueError:
+            return None
+
+    @property
+    def has_launched(self) -> bool:
+        """True once the public launch date has arrived (Tashkent time), or if no
+        launch date is configured (then the platform is always open)."""
+        ld = self.launch_date_value
+        return ld is None or datetime.now(_UZ_TZ).date() >= ld
 
     @property
     def cors_origins(self) -> list[str]:

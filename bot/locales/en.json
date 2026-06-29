@@ -66,6 +66,7 @@
   "setloc_failed": "⚠️ Couldn't save the location. Please try again from the app.",
   "setloc_invalid": "⚠️ This link expired. Tap “Set location via Telegram” in the app again.",
   "welcome_book_cta": "Hello! 👋\nTo book an appointment, tap the booking button 📅 below.",
+  "prelaunch_wait": "🎉 Opening soon!\n\nQulay Navbat goes fully live on July 20. From that day you'll be able to book right here.\n\nHang tight — see you very soon! 🙌",
   "min_suffix": "min",
   "status_label": "Status",
   "bstatus_pending": "Awaiting confirmation",
