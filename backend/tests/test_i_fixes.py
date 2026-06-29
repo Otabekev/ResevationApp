@@ -198,3 +198,26 @@ async def test_cancel_twice_rejected(client, db):
 
     r2 = await client.patch(f"/api/v1/bookings/{booking.id}/cancel", json={}, headers=headers)
     assert r2.status_code == 409
+
+
+# ── I6: admin overview recent-activity feed ──────────────────────────────────
+
+@pytest.mark.asyncio
+async def test_admin_recent_feed_renders_bookings(client, db):
+    """Regression: admin _booking_row read b.booking_time (no such column on the
+    Booking model — it's start_time), so the admin overview's /recent feed 500-ed
+    the moment any booking existed. The business side was unaffected."""
+    owner, biz, svc, staff = await _setup_bookable_business(db)
+    cust = await f.create_customer(db, telegram_id=909)
+    await f.create_booking(
+        db, business_id=biz.id, service_id=svc.id, staff_id=staff.id,
+        customer_id=cust.id, booking_date=date.today() + timedelta(days=2),
+        start_time=time(10, 0),
+    )
+    admin = await f.create_user(db, role="super_admin", telegram_id=222)
+
+    r = await client.get("/api/v1/admin/recent", headers=f.auth_header(admin.id))
+    assert r.status_code == 200, r.text
+    body = r.json()
+    assert body["recent_bookings"], "the booking should appear in the feed"
+    assert body["recent_bookings"][0]["booking_time"] == "10:00:00"
