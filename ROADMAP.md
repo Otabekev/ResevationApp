@@ -21,6 +21,24 @@ Things to tackle later. Newest ideas near the top of **Backlog**.
   users; making it multi-instance-safe is a *post-launch / proper-dev* task (see
   *Deferred performance / infra*). Until then: keep the backend at 1 instance.
 
+### Security hardening (from the 8-tip audit — fix A shipped; B + D queued here)
+- **B — Rate-limit the broadcast + secret endpoints.** `POST /admin/broadcast` and
+  `/admin/broadcast/test` fan out Telegram sends with NO rate limit (the
+  "unexpected bills" vector); `/admin/growth` is secret-gated by a query param with
+  no limit (brute-forceable). Add `@limiter.limit` (e.g. broadcast 5/min, test
+  10/min, growth 10/min). Super-admin-only today, so do it before broadcasting to a
+  real audience.
+- **D — Active crash monitoring (Sentry) + uptime ping.** Logs exist but nothing
+  *alerts* you on a crash. Add `sentry-sdk[fastapi]` to backend AND bot, gated on a
+  `SENTRY_DSN` env var (no-op in dev/tests), `send_default_pii=False`, capture
+  scheduler/broadcast job failures too; point a free uptime monitor (UptimeRobot)
+  at `/health`. ~30 min + 2 free accounts. Turn on before the soft launch so the
+  first real crash reaches you, not a customer.
+- _(Optional, low severity — C):_ three schedule-read GETs in `schedules.py`
+  (get_business_hours/get_staff_hours/get_breaks) have no auth (leak working hours);
+  and `admin.py` growth_map compares its secret with `!=` not `hmac.compare_digest`.
+  Bundle whenever convenient.
+
 ## 🔜 In progress
 - **Pre-launch gate** — until 2026-07-20 the bot's customer booking flow is gated:
   business **owners & staff pass through and can test freely**; everyone else sees

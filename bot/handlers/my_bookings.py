@@ -6,6 +6,7 @@ from aiogram.types import CallbackQuery, InlineKeyboardButton, InlineKeyboardMar
 
 import api_client
 from i18n import t
+from textutils import esc
 
 router = Router()
 
@@ -32,9 +33,9 @@ def format_booking(b: dict, lang: str) -> str:
     time_disp = (b.get("start_time") or "")[:5]
     status_word = t(f"bstatus_{status}", lang) if status else "—"
 
-    lines = [f"{icon} <b>{biz}</b>"]
+    lines = [f"{icon} <b>{esc(biz)}</b>"]
     if svc:
-        lines.append(f"💈 {svc}")
+        lines.append(f"💈 {esc(svc)}")
     lines.append(f"📅 {date_disp}  🕐 {time_disp}")
     lines.append(f"{t('status_label', lang)}: {status_word}")
     return "\n".join(lines)
