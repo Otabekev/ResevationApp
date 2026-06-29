@@ -1,3 +1,4 @@
+import hmac
 import time
 from datetime import date, datetime
 from typing import Literal
@@ -355,10 +356,26 @@ async def get_recent_activity(
 _growth_cache: dict = {"at": 0.0, "data": None}
 _GROWTH_TTL = 600.0  # seconds
 
+# Uzbekistan bounding box. A business location is shared via Telegram's "send
+# location" — which captures wherever the PHONE is — so a test shared from abroad
+# lands thousands of km away. Drop anything outside the country so a stray pin can
+# never appear in another country on the investor map.
+_UZ_LAT_MIN, _UZ_LAT_MAX = 37.1, 45.6
+_UZ_LNG_MIN, _UZ_LNG_MAX = 55.9, 73.2
+
+
+def _in_uzbekistan(lat: float | None, lng: float | None) -> bool:
+    return (
+        lat is not None and lng is not None
+        and _UZ_LAT_MIN <= lat <= _UZ_LAT_MAX
+        and _UZ_LNG_MIN <= lng <= _UZ_LNG_MAX
+    )
+
 
 @router.get("/growth")
 async def growth_map(secret: str = Query(""), db: AsyncSession = Depends(get_db)):
-    if not settings.growth_secret or secret != settings.growth_secret:
+    # Constant-time compare so the secret can't be guessed by timing.
+    if not settings.growth_secret or not hmac.compare_digest(secret, settings.growth_secret):
         raise HTTPException(status_code=403, detail="Forbidden")
 
     now = time.monotonic()
@@ -376,19 +393,20 @@ async def growth_map(secret: str = Query(""), db: AsyncSession = Depends(get_db)
                 .order_by(Business.created_at)
             )
         ).all()
+        # Only businesses physically inside Uzbekistan reach the map.
+        located = [(b, cat) for (b, cat) in rows if _in_uzbekistan(b.latitude, b.longitude)]
 
         # Week 1 = the earliest located business; everyone else is weeks-after that.
         earliest = None
-        for b, _name in rows:
+        for b, _name in located:
             if b.created_at and (earliest is None or b.created_at < earliest):
                 earliest = b.created_at
 
+        def _week_of(dt) -> int:
+            return (dt.date() - earliest.date()).days // 7 + 1 if (dt and earliest) else 1
+
         items = []
-        for b, cat_name in rows:
-            if b.created_at and earliest:
-                week = (b.created_at.date() - earliest.date()).days // 7 + 1
-            else:
-                week = 1
+        for b, cat_name in located:
             items.append({
                 "id": b.id,
                 "name": b.name,
@@ -397,11 +415,53 @@ async def growth_map(secret: str = Query(""), db: AsyncSession = Depends(get_db)
                 "category": cat_name or "Other",
                 "district": b.district or b.region or "",
                 "status": b.status,
-                "week": week,
+                "week": _week_of(b.created_at),
                 "joined": b.created_at.date().isoformat() if b.created_at else None,
             })
 
-        cached = {"businesses": items, "max_week": max((i["week"] for i in items), default=1)}
+        # ── Traction stats (for the investor charts) ─────────────────────────
+        total_businesses = await db.scalar(select(func.count(Business.id))) or 0
+        active_businesses = await db.scalar(
+            select(func.count(Business.id)).where(Business.status.in_(["active", "trial"]))
+        ) or 0
+        total_bookings = await db.scalar(select(func.count(Booking.id))) or 0
+
+        new_by_week: dict[int, int] = {}
+        for it in items:
+            new_by_week[it["week"]] = new_by_week.get(it["week"], 0) + 1
+
+        bookings_by_week: dict[int, int] = {}
+        if earliest:
+            for (created,) in (await db.execute(select(Booking.created_at))).all():
+                if created:
+                    w = max(1, _week_of(created))
+                    bookings_by_week[w] = bookings_by_week.get(w, 0) + 1
+
+        max_w = max([1, *new_by_week.keys(), *bookings_by_week.keys()])
+        weekly = []
+        cum_biz = cum_bk = 0
+        for w in range(1, max_w + 1):
+            cum_biz += new_by_week.get(w, 0)
+            cum_bk += bookings_by_week.get(w, 0)
+            weekly.append({
+                "week": w,
+                "new_businesses": new_by_week.get(w, 0),
+                "cum_businesses": cum_biz,
+                "bookings": bookings_by_week.get(w, 0),
+                "cum_bookings": cum_bk,
+            })
+
+        cached = {
+            "businesses": items,
+            "max_week": max((i["week"] for i in items), default=1),
+            "stats": {
+                "total_businesses": total_businesses,
+                "located_businesses": len(items),
+                "active_businesses": active_businesses,
+                "total_bookings": total_bookings,
+                "weekly": weekly,
+            },
+        }
         _growth_cache["data"] = cached
         _growth_cache["at"] = now
 
