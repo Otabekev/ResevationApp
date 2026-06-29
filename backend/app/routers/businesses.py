@@ -2,7 +2,7 @@ import hmac
 from datetime import datetime, timedelta, timezone
 
 from fastapi import APIRouter, Depends, HTTPException, status
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -32,38 +32,38 @@ class CategoryOut(BaseModel):
 
 class BusinessCreate(BaseModel):
     category_id: int
-    name: str
-    region: str = "Namangan"
-    district: str = "Pop"
-    city: str
-    address: str
-    phone: str
-    telegram_username: str | None = None
-    instagram_link: str | None = None
-    description: str | None = None
+    name: str = Field(..., min_length=1, max_length=255)
+    region: str = Field("Namangan", max_length=100)
+    district: str = Field("Pop", max_length=100)
+    city: str = Field(..., max_length=100)
+    address: str = Field(..., max_length=500)
+    phone: str = Field(..., max_length=20)
+    telegram_username: str | None = Field(None, max_length=100)
+    instagram_link: str | None = Field(None, max_length=255)
+    description: str | None = Field(None, max_length=2000)
     latitude: float | None = None
     longitude: float | None = None
 
 
 class BusinessUpdate(BaseModel):
-    name: str | None = None
-    city: str | None = None
-    region: str | None = None
-    district: str | None = None
-    address: str | None = None
-    phone: str | None = None
-    telegram_username: str | None = None
-    instagram_link: str | None = None
-    description: str | None = None
+    name: str | None = Field(None, max_length=255)
+    city: str | None = Field(None, max_length=100)
+    region: str | None = Field(None, max_length=100)
+    district: str | None = Field(None, max_length=100)
+    address: str | None = Field(None, max_length=500)
+    phone: str | None = Field(None, max_length=20)
+    telegram_username: str | None = Field(None, max_length=100)
+    instagram_link: str | None = Field(None, max_length=255)
+    description: str | None = Field(None, max_length=2000)
     is_online_booking_enabled: bool | None = None
     min_advance_booking_minutes: int | None = None
     max_advance_booking_days: int | None = None
     cancellation_policy_hours: int | None = None
     slot_step_minutes: int | None = None
     allow_multi_service: bool | None = None
-    custom_message_uz: str | None = None
-    custom_message_ru: str | None = None
-    custom_message_en: str | None = None
+    custom_message_uz: str | None = Field(None, max_length=2000)
+    custom_message_ru: str | None = Field(None, max_length=2000)
+    custom_message_en: str | None = Field(None, max_length=2000)
     latitude: float | None = None
     longitude: float | None = None
 

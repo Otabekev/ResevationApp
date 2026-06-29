@@ -23,6 +23,7 @@ from aiogram.types import CallbackQuery, InlineKeyboardButton, InlineKeyboardMar
 
 import api_client
 from i18n import t
+from textutils import esc
 
 router = Router()
 
@@ -591,15 +592,17 @@ async def phone_entered(message: Message, state: FSMContext) -> None:
     except ValueError:
         date_disp = bd or "—"
 
+    # Escape user-controlled values (business/service/staff/customer names) — the
+    # message is HTML-parsed, so a raw & or < would break the send.
     summary = t(
         "booking_summary", lang,
-        business=data.get("business_name", "—"),
-        service=data.get("service_name", "—"),
-        staff=data.get("staff_name", t("staff_any", lang)),
+        business=esc(data.get("business_name", "—")),
+        service=esc(data.get("service_name", "—")),
+        staff=esc(data.get("staff_name", t("staff_any", lang))),
         date=date_disp,
         time=data.get("start_time", "—"),
         price=price_str,
-        name=customer_name,
+        name=esc(customer_name),
         phone=phone,
     )
 

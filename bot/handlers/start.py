@@ -15,6 +15,7 @@ from aiogram.types import (
 
 import api_client
 from i18n import t
+from textutils import esc
 
 logger = logging.getLogger(__name__)
 router = Router()
@@ -146,7 +147,7 @@ async def _handle_join(message: Message, state: FSMContext, token: str) -> None:
         result = await api_client.join_via_invite(token, access_token)
         biz = await api_client.get_public_business(result["business_id"])
         await message.answer(
-            t("join_success", lang, business=biz.get("name", "")),
+            t("join_success", lang, business=esc(biz.get("name", ""))),
             reply_markup=main_menu_keyboard(lang),
         )
     except Exception:
@@ -273,7 +274,7 @@ async def set_language(callback: CallbackQuery, state: FSMContext) -> None:
             rows.append([InlineKeyboardButton(text=t("view_location", new_lang), callback_data=f"loc_{biz_id}")])
         rows.append([InlineKeyboardButton(text=t("back", new_lang), callback_data="main_menu")])
         await callback.message.edit_text(
-            f"🏪 <b>{data.get('business_name', '')}</b>\n📍 {data.get('business_address', '')}",
+            f"🏪 <b>{esc(data.get('business_name', ''))}</b>\n📍 {esc(data.get('business_address', ''))}",
             parse_mode="HTML",
             reply_markup=InlineKeyboardMarkup(inline_keyboard=rows),
         )
@@ -318,7 +319,7 @@ async def send_business_location(callback: CallbackQuery, state: FSMContext) -> 
             return
         await callback.message.answer_location(latitude=lat, longitude=lng)
         await callback.message.answer(
-            f"🏪 <b>{biz.get('name', '')}</b>\n📍 {biz.get('address', '')}",
+            f"🏪 <b>{esc(biz.get('name', ''))}</b>\n📍 {esc(biz.get('address', ''))}",
             parse_mode="HTML",
         )
     except Exception:
