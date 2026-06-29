@@ -6,7 +6,7 @@ import { updateMyLanguage } from "../api/client";
 import BrandMark from "./BrandMark";
 import {
   IconHome, IconCalendar, IconScissors, IconUsers, IconClock, IconChart,
-  IconSettings, IconShield, IconChevronDown, IconLogout, IconGlobe, IconCheck,
+  IconSettings, IconShield, IconChevronDown, IconLogout, IconGlobe, IconCheck, IconSend,
 } from "./icons";
 
 const NAV_ITEMS = [
@@ -23,6 +23,7 @@ const NAV_ITEMS = [
 const ADMIN_NAV_ITEMS = [
   { path: "/", Icon: IconHome, key: "overview", mobile: true },
   { path: "/admin/businesses", Icon: IconShield, key: "businesses", mobile: true },
+  { path: "/admin/broadcast", Icon: IconSend, key: "broadcast", mobile: true },
 ];
 
 const LANGS = [

@@ -206,3 +206,13 @@ export const updateBusinessStatus = (bizId, status) =>
 export const getAdminBusinessDetail = (bizId) =>
   api.get(`/admin/businesses/${bizId}/detail`).then((r) => r.data);
 export const getAdminRecent = () => api.get("/admin/recent").then((r) => r.data);
+
+// ── Broadcasts (super-admin announcements) ─────────────────────────────────────
+export const getBroadcastAudienceCounts = () =>
+  api.get("/admin/broadcast/audience-counts").then((r) => r.data);
+export const getBroadcasts = () => api.get("/admin/broadcasts").then((r) => r.data);
+export const createBroadcast = (data) => api.post("/admin/broadcast", data).then((r) => r.data);
+export const sendBroadcastTest = (text) =>
+  api.post("/admin/broadcast/test", { text }).then((r) => r.data);
+export const cancelBroadcast = (id) =>
+  api.post(`/admin/broadcasts/${id}/cancel`).then((r) => r.data);

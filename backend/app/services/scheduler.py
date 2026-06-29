@@ -136,6 +136,14 @@ async def _send_reminders_safe() -> None:
         logger.exception("Reminder sweep failed")
 
 
+async def _send_due_broadcasts_safe() -> None:
+    try:
+        from app.services.broadcast_service import send_due_broadcasts
+        await send_due_broadcasts()
+    except Exception:
+        logger.exception("Broadcast poll failed")
+
+
 def start_scheduler() -> None:
     scheduler.add_job(
         _send_reminders_safe,
@@ -145,6 +153,17 @@ def start_scheduler() -> None:
         coalesce=True,        # collapse missed runs into one
         max_instances=1,      # never overlap two sweeps
         misfire_grace_time=300,
+    )
+    # Poll for due scheduled broadcasts (near-minute precision). Cheap query;
+    # only does work when a broadcast's scheduled_at has arrived.
+    scheduler.add_job(
+        _send_due_broadcasts_safe,
+        "interval",
+        seconds=60,
+        id="broadcasts",
+        coalesce=True,
+        max_instances=1,
+        misfire_grace_time=120,
     )
     scheduler.start()
 
