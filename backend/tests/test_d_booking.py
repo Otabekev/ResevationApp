@@ -159,6 +159,89 @@ async def test_sequential_double_book_rejected(db):
         )
 
 
+# ── D7: multi-service bookings (back-to-back, one staff) ─────────────────────
+
+async def _multi_setup(db, *, durations, telegram_id):
+    """Business + one staff who can do every given service, open 9–18 daily."""
+    cat = await create_category(db)
+    owner = await create_user(db, role="business_owner", telegram_id=telegram_id)
+    biz = await create_business(db, owner_id=owner.id, category_id=cat.id)
+    svcs = [await create_service(db, business_id=biz.id, duration_minutes=d) for d in durations]
+    staff = await create_staff(db, business_id=biz.id)
+    for s in svcs:
+        await link_staff_service(db, staff_id=staff.id, service_id=s.id)
+    for dow in range(7):
+        db.add(WorkingHours(business_id=biz.id, day_of_week=dow, start_time=time(9, 0), end_time=time(18, 0)))
+    await db.commit()
+    return biz, svcs, staff
+
+
+def _mins(t: time) -> int:
+    return t.hour * 60 + t.minute
+
+
+async def test_multi_service_sums_duration(db):
+    biz, (svc1, svc2), staff = await _multi_setup(db, durations=[30, 20], telegram_id=41)
+    soon = date.today() + timedelta(days=3)
+    slots = await get_available_slots(db, biz.id, svc1.id, soon, staff.id, service_ids=[svc1.id, svc2.id])
+    assert slots, "expected slots for the 50-minute combined block"
+    assert _mins(slots[0].end_time) - _mins(slots[0].start_time) == 50
+
+
+async def test_multi_service_staff_must_do_all(db):
+    cat = await create_category(db)
+    owner = await create_user(db, role="business_owner", telegram_id=42)
+    biz = await create_business(db, owner_id=owner.id, category_id=cat.id)
+    svc1 = await create_service(db, business_id=biz.id, duration_minutes=30)
+    svc2 = await create_service(db, business_id=biz.id, duration_minutes=20)
+    a = await create_staff(db, business_id=biz.id, name="A")
+    b = await create_staff(db, business_id=biz.id, name="B")
+    await link_staff_service(db, staff_id=a.id, service_id=svc1.id)
+    await link_staff_service(db, staff_id=a.id, service_id=svc2.id)
+    await link_staff_service(db, staff_id=b.id, service_id=svc1.id)  # B can't do svc2
+    for dow in range(7):
+        db.add(WorkingHours(business_id=biz.id, day_of_week=dow, start_time=time(9, 0), end_time=time(18, 0)))
+    await db.commit()
+    soon = date.today() + timedelta(days=3)
+    # "any staff" for [svc1, svc2] → only A is eligible at every slot.
+    slots = await get_available_slots(db, biz.id, svc1.id, soon, None, service_ids=[svc1.id, svc2.id])
+    assert slots
+    assert all(set(s.available_staff_ids) == {a.id} for s in slots)
+    # Asking specifically for B (who can't do svc2) → nothing.
+    assert await get_available_slots(db, biz.id, svc1.id, soon, b.id, service_ids=[svc1.id, svc2.id]) == []
+
+
+async def test_multi_service_single_service_path_unchanged(db):
+    """A one-element service_ids list must behave exactly like the legacy call."""
+    biz, (svc,), staff = await _multi_setup(db, durations=[30], telegram_id=43)
+    soon = date.today() + timedelta(days=3)
+    legacy = await get_available_slots(db, biz.id, svc.id, soon, staff.id)
+    as_list = await get_available_slots(db, biz.id, svc.id, soon, staff.id, service_ids=[svc.id])
+    assert legacy == as_list and legacy != []
+
+
+async def test_multi_service_create_persists_all_and_primary_first(db):
+    from sqlalchemy import select as _select
+
+    from app.models.booking import booking_services
+
+    biz, (svc1, svc2), staff = await _multi_setup(db, durations=[30, 20], telegram_id=44)
+    cust = await create_customer(db, telegram_id=600)
+    soon = date.today() + timedelta(days=3)
+    bk = await create_booking(
+        db, business_id=biz.id, service_id=svc1.id, staff_id=staff.id,
+        customer=cust, booking_date=soon, start_time=time(10, 0),
+        service_ids=[svc1.id, svc2.id],
+    )
+    await db.commit()
+    assert bk.service_id == svc1.id        # primary = first selected
+    assert bk.end_time == time(10, 50)     # 30 + 20 = 50 minutes
+    rows = (await db.execute(
+        _select(booking_services.c.service_id).where(booking_services.c.booking_id == bk.id)
+    )).all()
+    assert {r[0] for r in rows} == {svc1.id, svc2.id}
+
+
 # ── D1/D2: true concurrency — Postgres only ──────────────────────────────────
 
 @pytest.mark.postgres

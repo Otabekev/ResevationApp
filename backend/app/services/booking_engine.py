@@ -37,7 +37,7 @@ from sqlalchemy import and_, func, or_, select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.models.booking import Booking, Customer
+from app.models.booking import Booking, Customer, booking_services
 from app.models.business import Business
 from app.models.schedule import BlockedTime, BreakTime, WorkingHours
 from app.models.service import Service
@@ -268,6 +268,39 @@ async def _get_booking_intervals(
     return intervals
 
 
+async def _load_services_for_block(
+    db: AsyncSession,
+    business_id: int,
+    service_ids: list[int],
+) -> tuple[list[Service], int, int, int]:
+    """Load the selected services IN ORDER (the order is the back-to-back
+    sequence) and return (services, total_duration, lead_buffer, trail_buffer).
+
+    Returns ([], 0, 0, 0) if any id is missing/not in this business or inactive.
+    Back-to-back means NO buffers between services — only the first service's
+    buffer_before and the last service's buffer_after bracket the whole block.
+    A single service reduces to (one_service, its_duration, its_before, its_after).
+    """
+    if not service_ids:
+        return [], 0, 0, 0
+    rows = await db.execute(
+        select(Service).where(
+            and_(Service.id.in_(service_ids), Service.business_id == business_id)
+        )
+    )
+    by_id = {s.id: s for s in rows.scalars().all()}
+    services: list[Service] = []
+    for sid in service_ids:
+        svc = by_id.get(sid)
+        if svc is None or not svc.is_active:
+            return [], 0, 0, 0
+        services.append(svc)
+    total_duration = sum(s.duration_minutes for s in services)
+    lead_buffer = services[0].buffer_before_minutes
+    trail_buffer = services[-1].buffer_after_minutes
+    return services, total_duration, lead_buffer, trail_buffer
+
+
 # ---------------------------------------------------------------------------
 # Public API
 # ---------------------------------------------------------------------------
@@ -278,17 +311,24 @@ async def get_available_slots(
     service_id: int,
     target_date: date,
     staff_id: int | None = None,
+    *,
+    service_ids: list[int] | None = None,
 ) -> list[SlotOption]:
     """
     Returns available booking slots for a given service on a given date.
     If staff_id is None, checks all eligible staff and aggregates availability.
+
+    Pass service_ids to book several services back-to-back as one block (summed
+    duration; only staff who can do ALL of them are eligible). Omit it and the
+    behavior is exactly the single-service path.
     """
-    # Load service
-    svc_result = await db.execute(
-        select(Service).where(and_(Service.id == service_id, Service.business_id == business_id))
+    ids = service_ids if service_ids else [service_id]
+
+    # Load the selected service(s); multi-service runs back-to-back as one block.
+    services, total_duration, lead_buffer, trail_buffer = await _load_services_for_block(
+        db, business_id, ids
     )
-    service = svc_result.scalar_one_or_none()
-    if service is None or not service.is_active:
+    if not services:
         return []
 
     # Load business for slot_step_minutes
@@ -307,15 +347,16 @@ async def get_available_slots(
 
     step = business.slot_step_minutes or 15
 
-    # Resolve eligible staff
+    # Resolve eligible staff — must be able to perform EVERY selected service.
+    unique_ids = set(ids)
     if staff_id is not None:
-        # Verify this staff member can perform the service
-        ss_result = await db.execute(
-            select(StaffService).where(
-                and_(StaffService.staff_id == staff_id, StaffService.service_id == service_id)
+        # Verify this staff member can perform ALL selected services.
+        cnt = await db.scalar(
+            select(func.count(func.distinct(StaffService.service_id))).where(
+                and_(StaffService.staff_id == staff_id, StaffService.service_id.in_(unique_ids))
             )
         )
-        if ss_result.scalar_one_or_none() is None:
+        if (cnt or 0) != len(unique_ids):
             return []
         staff_result = await db.execute(
             select(Staff).where(and_(Staff.id == staff_id, Staff.is_active == True))
@@ -323,17 +364,19 @@ async def get_available_slots(
         eligible_staff = [staff_result.scalar_one_or_none()]
         eligible_staff = [s for s in eligible_staff if s is not None]
     else:
-        # All active staff who can perform this service
+        # All active staff linked to EVERY selected service (intersection).
         stmt = (
             select(Staff)
             .join(StaffService, StaffService.staff_id == Staff.id)
             .where(
                 and_(
-                    StaffService.service_id == service_id,
+                    StaffService.service_id.in_(unique_ids),
                     Staff.business_id == business_id,
                     Staff.is_active == True,
                 )
             )
+            .group_by(Staff.id)
+            .having(func.count(func.distinct(StaffService.service_id)) == len(unique_ids))
         )
         staff_result = await db.execute(stmt)
         eligible_staff = staff_result.scalars().all()
@@ -366,10 +409,10 @@ async def get_available_slots(
             iv_start_m = _to_minutes(iv.start)
             iv_end_m = _to_minutes(iv.end)
 
-            # Earliest start: interval start + buffer_before so prep time fits before customer
-            earliest_m = iv_start_m + service.buffer_before_minutes
-            # Latest start: must finish service + buffer_after before interval ends
-            latest_m = iv_end_m - service.duration_minutes - service.buffer_after_minutes
+            # Earliest start: interval start + first service's buffer_before
+            earliest_m = iv_start_m + lead_buffer
+            # Latest start: the whole back-to-back block + last buffer must fit before interval ends
+            latest_m = iv_end_m - total_duration - trail_buffer
 
             if earliest_m > latest_m:
                 continue
@@ -391,7 +434,7 @@ async def get_available_slots(
     for start_t in sorted(slot_map.keys()):
         if to_local(target_date, start_t) < earliest_allowed:
             continue
-        end_m = _to_minutes(start_t) + service.duration_minutes
+        end_m = _to_minutes(start_t) + total_duration
         slots.append(
             SlotOption(
                 start_time=start_t,
@@ -413,6 +456,7 @@ async def create_booking(
     booking_date: date,
     start_time: time,
     notes: str | None = None,
+    service_ids: list[int] | None = None,
 ) -> Booking:
     """
     Creates a booking with double-booking prevention.
@@ -421,17 +465,22 @@ async def create_booking(
     bookings for the target staff + date, preventing race conditions.
     The caller is responsible for committing the transaction.
     Raises ValueError on conflict.
+
+    Pass service_ids for a multi-service booking (back-to-back, one staff). The
+    first id becomes the primary Booking.service_id; all ids are linked via
+    booking_services. Omit it for the single-service path.
     """
-    # Load service
-    svc_result = await db.execute(select(Service).where(Service.id == service_id))
-    service = svc_result.scalar_one_or_none()
-    if service is None:
+    ids = service_ids if service_ids else [service_id]
+    services, total_duration, lead_buffer, trail_buffer = await _load_services_for_block(
+        db, business_id, ids
+    )
+    if not services:
         raise ValueError("Service not found")
 
     # Re-validate the requested slot server-side against full availability
     # (working hours, breaks, blocked times, existing bookings, booking windows).
     # Never trust the slot the client sends.
-    slots = await get_available_slots(db, business_id, service_id, booking_date, staff_id)
+    slots = await get_available_slots(db, business_id, ids[0], booking_date, staff_id, service_ids=ids)
     slot = next((s for s in slots if s.start_time == start_time), None)
     if slot is None:
         raise ValueError("Time slot is not available")
@@ -473,10 +522,10 @@ async def create_booking(
     existing_result = await db.execute(lock_stmt)
     existing_bookings = existing_result.scalars().all()
 
-    # Calculate the full blocked window for the new booking
-    end_time = _from_minutes(_to_minutes(start_time) + service.duration_minutes)
-    new_block_start = _from_minutes(_to_minutes(start_time) - service.buffer_before_minutes)
-    new_block_end = _from_minutes(_to_minutes(end_time) + service.buffer_after_minutes)
+    # Calculate the full blocked window for the new (possibly multi-service) booking
+    end_time = _from_minutes(_to_minutes(start_time) + total_duration)
+    new_block_start = _from_minutes(_to_minutes(start_time) - lead_buffer)
+    new_block_end = _from_minutes(_to_minutes(end_time) + trail_buffer)
 
     # Check for overlap with existing bookings (batch-load their services)
     ex_svc_by_id: dict[int, Service] = {}
@@ -498,10 +547,11 @@ async def create_booking(
            _to_minutes(new_block_end) > _to_minutes(ex_block_start):
             raise ValueError("Time slot is no longer available")
 
-    # Insert booking — caller must commit
+    # Insert booking — caller must commit. service_id stays the FIRST service for
+    # backward compatibility; every selected service is linked below.
     booking = Booking(
         business_id=business_id,
-        service_id=service_id,
+        service_id=ids[0],
         staff_id=assigned_staff_id,
         customer_id=customer.id,
         customer_name=customer.name,
@@ -509,7 +559,7 @@ async def create_booking(
         booking_date=booking_date,
         start_time=start_time,
         end_time=end_time,
-        status="pending" if service.requires_confirmation else "confirmed",
+        status="pending" if any(s.requires_confirmation for s in services) else "confirmed",
         notes=notes,
         was_auto_assigned=auto_assigned,
     )
@@ -521,5 +571,12 @@ async def create_booking(
         # raced past the application check. Surface it as a clean conflict.
         await db.rollback()
         raise ValueError("Time slot is no longer available")
+
+    # Link every selected service (the first is also on booking.service_id).
+    await db.execute(
+        booking_services.insert(),
+        [{"booking_id": booking.id, "service_id": sid} for sid in ids],
+    )
+
     await db.refresh(booking)
     return booking
