@@ -128,11 +128,19 @@ async def get_launch_status(telegram_id: int) -> dict:
 
 
 async def get_available_slots(
-    business_id: int, service_id: int, date_str: str, staff_id: int | None = None
+    business_id: int,
+    service_id: int,
+    date_str: str,
+    staff_id: int | None = None,
+    service_ids: list[int] | None = None,
 ) -> list[dict]:
-    params = {"business_id": business_id, "service_id": service_id, "date": date_str}
+    params: dict = {"business_id": business_id, "service_id": service_id, "date": date_str}
     if staff_id:
         params["staff_id"] = staff_id
+    if service_ids:
+        # httpx serializes a list value as repeated query params
+        # (?service_ids=1&service_ids=2) → multi-service combined-duration slots.
+        params["service_ids"] = service_ids
     resp = await _client.get(f"{BACKEND_URL}/availability", params=params)
     resp.raise_for_status()
     return resp.json()

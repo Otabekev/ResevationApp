@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import { getServices, createService, updateService } from "../api/client";
+import { getServices, createService, updateService, updateBusiness } from "../api/client";
 import useStore from "../store/useStore";
 import { useT } from "../i18n";
 import { SkeletonList } from "../components/Skeleton";
@@ -22,9 +22,10 @@ function fmtPrice(price, t) {
 }
 
 export default function Services() {
-  const { lang, activeBusiness } = useStore();
+  const { lang, activeBusiness, setActiveBusiness } = useStore();
   const t = useT(lang);
   const [services, setServices] = useState([]);
+  const [multiOn, setMultiOn] = useState(false);
   const [showModal, setShowModal] = useState(false);
   const [editing, setEditing] = useState(null);
   const [form, setForm] = useState(EMPTY_FORM);
@@ -35,7 +36,10 @@ export default function Services() {
   const [showDescriptions, setShowDescriptions] = useState(false);
 
   useEffect(() => {
-    if (activeBusiness) load();
+    if (activeBusiness) {
+      load();
+      setMultiOn(Boolean(activeBusiness.allow_multi_service));
+    }
   }, [activeBusiness]);
 
   const load = async () => {
@@ -113,6 +117,19 @@ export default function Services() {
     }
   };
 
+  const handleMultiToggle = async () => {
+    const next = !multiOn;
+    setMultiOn(next);  // optimistic
+    try {
+      const updated = await updateBusiness(activeBusiness.id, { allow_multi_service: next });
+      // Keep the store's business in sync so the toggle survives navigation.
+      setActiveBusiness({ ...activeBusiness, allow_multi_service: updated.allow_multi_service });
+    } catch {
+      setMultiOn(!next);  // rollback
+      setToast({ message: t("error"), variant: "error" });
+    }
+  };
+
   if (!activeBusiness) {
     return <EmptyState icon={<IconScissors size={26} />} title={t("select_business_first")} subtitle={t("select_business_desc")} />;
   }
@@ -127,6 +144,26 @@ export default function Services() {
         <button className="btn btn-primary" onClick={openNew}>
           <IconPlus size={17} /> {t("new_service")}
         </button>
+      </div>
+
+      {/* Business-level setting: let customers pick several services in one booking. */}
+      <div
+        className="card card-tight row"
+        style={{ justifyContent: "space-between", gap: "var(--space-3)", marginBottom: "var(--space-3)" }}
+      >
+        <div>
+          <div style={{ fontWeight: 650, fontSize: "var(--text-sm)" }}>{t("allow_multi_service")}</div>
+          <div className="form-hint" style={{ marginTop: 2 }}>{t("allow_multi_service_hint")}</div>
+        </div>
+        <label className="toggle">
+          <input
+            type="checkbox"
+            aria-label={t("allow_multi_service")}
+            checked={multiOn}
+            onChange={handleMultiToggle}
+          />
+          <span className="toggle-slider"></span>
+        </label>
       </div>
 
       {loading ? (

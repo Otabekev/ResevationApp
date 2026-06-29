@@ -1,7 +1,7 @@
 from datetime import date, time
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Request, status
-from pydantic import BaseModel, Field, field_validator
+from pydantic import BaseModel, Field, field_validator, model_validator
 from sqlalchemy import and_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -28,10 +28,23 @@ router = APIRouter(tags=["bookings"])
 
 # ── Schemas ──────────────────────────────────────────────────────────────────
 
+def _normalize_service_ids(self):
+    """Keep service_id and service_ids consistent. With no list, default it to
+    [service_id]; with a list, the first id is the primary service_id. So
+    downstream code can always use service_ids and the legacy service_id alike."""
+    if not self.service_ids:
+        self.service_ids = [self.service_id]
+    else:
+        self.service_id = self.service_ids[0]
+    return self
+
+
 class BookingCreatePublic(BaseModel):
     """Used by Telegram bot / Mini App customers."""
     business_id: int
     service_id: int
+    # Optional multi-service booking (back-to-back, one staff). Omit → single.
+    service_ids: list[int] | None = None
     staff_id: int | None = None
     booking_date: date
     start_time: time
@@ -46,16 +59,21 @@ class BookingCreatePublic(BaseModel):
     def _lang(cls, v: str) -> str:
         return v if v in ("uz", "ru", "en") else "uz"
 
+    _fill_service_ids = model_validator(mode="after")(_normalize_service_ids)
+
 
 class BookingCreateManual(BaseModel):
     """Used by business owner to manually create a booking."""
     service_id: int
+    service_ids: list[int] | None = None
     staff_id: int | None = None
     booking_date: date
     start_time: time
     customer_name: str = Field(..., min_length=1, max_length=255)
     customer_phone: str = Field(..., min_length=3, max_length=20)
     notes: str | None = Field(None, max_length=1000)
+
+    _fill_service_ids = model_validator(mode="after")(_normalize_service_ids)
 
 
 class BookingOut(BaseModel):
@@ -175,6 +193,13 @@ async def create_public_booking(
         customer.phone = body.customer_phone
         customer.language = body.language
 
+    # The business's multi-service toggle is authoritative — if it's off, ignore
+    # any extra services the client sent and book only the primary one.
+    _biz = await db.get(Business, body.business_id)
+    if _biz is None:
+        raise HTTPException(status_code=404, detail="Business not found")
+    service_ids = body.service_ids if _biz.allow_multi_service else [body.service_id]
+
     try:
         booking = await create_booking(
             db,
@@ -185,6 +210,7 @@ async def create_public_booking(
             booking_date=body.booking_date,
             start_time=body.start_time,
             notes=body.notes,
+            service_ids=service_ids,
         )
     except ValueError as e:
         await db.rollback()
@@ -329,6 +355,7 @@ async def create_manual_booking(
     else:
         customer.name = body.customer_name
 
+    service_ids = body.service_ids if business.allow_multi_service else [body.service_id]
     try:
         booking = await create_booking(
             db,
@@ -339,6 +366,7 @@ async def create_manual_booking(
             booking_date=body.booking_date,
             start_time=body.start_time,
             notes=body.notes,
+            service_ids=service_ids,
         )
     except ValueError as e:
         await db.rollback()

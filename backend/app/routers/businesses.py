@@ -60,6 +60,7 @@ class BusinessUpdate(BaseModel):
     max_advance_booking_days: int | None = None
     cancellation_policy_hours: int | None = None
     slot_step_minutes: int | None = None
+    allow_multi_service: bool | None = None
     custom_message_uz: str | None = None
     custom_message_ru: str | None = None
     custom_message_en: str | None = None
@@ -86,6 +87,7 @@ class BusinessOut(BaseModel):
     max_advance_booking_days: int
     cancellation_policy_hours: int
     slot_step_minutes: int
+    allow_multi_service: bool
     latitude: float | None
     longitude: float | None
     custom_message_uz: str | None
@@ -238,6 +240,7 @@ class PublicBusinessOut(BaseModel):
     instagram_link: str | None
     description: str | None
     is_online_booking_enabled: bool
+    allow_multi_service: bool
     latitude: float | None
     longitude: float | None
     custom_message_uz: str | None
