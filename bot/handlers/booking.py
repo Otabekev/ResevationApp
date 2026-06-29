@@ -80,7 +80,7 @@ def date_keyboard(lang: str) -> InlineKeyboardMarkup:
             label = f"{t('date_tomorrow', lang)} · {d.strftime('%d.%m')}"
         else:
             weekday = t(f"wd_{d.weekday()}", lang)
-            label = f"{weekday} · {d.strftime('%d.%m.%Y')}"
+            label = f"{weekday} · {d.strftime('%d.%m')}"
         rows.append([InlineKeyboardButton(text=label, callback_data=f"date_{d.isoformat()}")])
     rows.append([InlineKeyboardButton(text=t("back", lang), callback_data="choose_staff_back")])
     return InlineKeyboardMarkup(inline_keyboard=rows)
@@ -214,7 +214,7 @@ async def business_chosen(callback: CallbackQuery, state: FSMContext) -> None:
         duration = s.get("duration_minutes", 0)
         price = s.get("price")
         price_str = f" • {t('price_uzs', lang, amount=f'{int(float(price)):,}')}" if price else ""
-        return f"{name} ({duration}′){price_str}"
+        return f"{name} ({duration} {t('min_suffix', lang)}){price_str}"
 
     data = await state.get_data()
     back_cb = f"cat_{data['category_id']}" if data.get("category_id") else "book_start"
@@ -426,12 +426,20 @@ async def phone_entered(message: Message, state: FSMContext) -> None:
         t("price_uzs", lang, amount=f"{int(float(price)):,}") if price else t("price_free", lang)
     )
 
+    # Show the date the same friendly way the picker did (DD.MM.YYYY), not the
+    # raw ISO string the API uses internally.
+    bd = data.get("booking_date")
+    try:
+        date_disp = date.fromisoformat(bd).strftime("%d.%m.%Y") if bd else "—"
+    except ValueError:
+        date_disp = bd or "—"
+
     summary = t(
         "booking_summary", lang,
         business=data.get("business_name", "—"),
         service=data.get("service_name", "—"),
         staff=data.get("staff_name", t("staff_any", lang)),
-        date=data.get("booking_date", "—"),
+        date=date_disp,
         time=data.get("start_time", "—"),
         price=price_str,
         name=customer_name,

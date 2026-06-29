@@ -220,9 +220,12 @@ async def confirm_web_login(callback: CallbackQuery, state: FSMContext) -> None:
 async def settings_menu(callback: CallbackQuery, state: FSMContext) -> None:
     data = await state.get_data()
     lang = data.get("lang", "uz")
+    # Title + a Back button so it reads as a real Settings screen, not a reset.
+    kb = language_keyboard()
+    kb.inline_keyboard.append([InlineKeyboardButton(text=t("back", lang), callback_data="main_menu")])
     await callback.message.edit_text(
-        t("choose_language", lang),
-        reply_markup=language_keyboard(),
+        t("settings_title", lang),
+        reply_markup=kb,
     )
     await callback.answer()
 
