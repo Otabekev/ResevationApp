@@ -52,9 +52,13 @@ async function refreshTokens() {
 const MAX_RETRIES = 3;
 const RETRY_BASE_MS = 600;
 
-function isIdempotent(config) {
+function isRetryable(config) {
+  // Safe to replay through a transient blip: all reads, PLUS writes explicitly
+  // flagged idempotent (e.g. "replace the whole week's working hours" — sending
+  // it again changes nothing). Non-idempotent writes (create booking, add break)
+  // are never auto-retried, so a blip can't double-create.
   const m = (config?.method || "get").toLowerCase();
-  return m === "get" || m === "head";
+  return m === "get" || m === "head" || config?.retryable === true;
 }
 
 function isTransient(err) {
@@ -86,9 +90,9 @@ api.interceptors.response.use(
     }
 
     // Retry transient backend unavailability (restart / cold-start / blip) on
-    // idempotent reads with backoff (0.6s, 1.2s, 1.8s) so a momentary failure
-    // doesn't surface as a hard error.
-    if (original && isIdempotent(original) && isTransient(err)) {
+    // idempotent requests with backoff (0.6s, 1.2s, 1.8s) so a momentary failure
+    // doesn't surface as a hard error — covers reads and idempotent setup writes.
+    if (original && isRetryable(original) && isTransient(err)) {
       original._retryCount = original._retryCount || 0;
       if (original._retryCount < MAX_RETRIES) {
         original._retryCount += 1;
@@ -128,13 +132,13 @@ export const pollLocationShare = (nonce) =>
 export const getMyBusinesses = () => api.get("/businesses/mine").then((r) => r.data);
 export const getBusiness = (id) => api.get(`/businesses/${id}`).then((r) => r.data);
 export const createBusiness = (data) => api.post("/businesses", data).then((r) => r.data);
-export const updateBusiness = (id, data) => api.patch(`/businesses/${id}`, data).then((r) => r.data);
+export const updateBusiness = (id, data) => api.patch(`/businesses/${id}`, data, { retryable: true }).then((r) => r.data);
 
 // ── Services ──────────────────────────────────────────────────────────────────
 export const getServices = (bizId) => api.get(`/businesses/${bizId}/services/all`).then((r) => r.data);
 export const createService = (bizId, data) => api.post(`/businesses/${bizId}/services`, data).then((r) => r.data);
 export const updateService = (bizId, svcId, data) =>
-  api.patch(`/businesses/${bizId}/services/${svcId}`, data).then((r) => r.data);
+  api.patch(`/businesses/${bizId}/services/${svcId}`, data, { retryable: true }).then((r) => r.data);
 export const deleteService = (bizId, svcId) =>
   api.delete(`/businesses/${bizId}/services/${svcId}`);
 
@@ -146,9 +150,9 @@ export const createStaff = (bizId, data) =>
 export const addSelfProvider = (bizId, data = {}) =>
   api.post(`/businesses/${bizId}/staff/me`, data).then((r) => r.data);
 export const updateStaff = (bizId, staffId, data) =>
-  api.patch(`/businesses/${bizId}/staff/${staffId}`, data).then((r) => r.data);
+  api.patch(`/businesses/${bizId}/staff/${staffId}`, data, { retryable: true }).then((r) => r.data);
 export const setStaffServices = (bizId, staffId, serviceIds) =>
-  api.put(`/businesses/${bizId}/staff/${staffId}/services`, serviceIds).then((r) => r.data);
+  api.put(`/businesses/${bizId}/staff/${staffId}/services`, serviceIds, { retryable: true }).then((r) => r.data);
 export const createStaffInvite = (bizId, staffId) =>
   api.post(`/businesses/${bizId}/staff/${staffId}/invite`).then((r) => r.data);
 
@@ -156,13 +160,13 @@ export const createStaffInvite = (bizId, staffId) =>
 export const getWorkingHours = (bizId) =>
   api.get(`/businesses/${bizId}/working-hours`).then((r) => r.data);
 export const setWorkingHours = (bizId, hours) =>
-  api.put(`/businesses/${bizId}/working-hours`, { hours }).then((r) => r.data);
+  api.put(`/businesses/${bizId}/working-hours`, { hours }, { retryable: true }).then((r) => r.data);
 export const getStaffWorkingHours = (bizId, staffId) =>
   api.get(`/businesses/${bizId}/staff/${staffId}/working-hours`).then((r) => r.data);
 export const setStaffWorkingHours = (bizId, staffId, hours) =>
-  api.put(`/businesses/${bizId}/staff/${staffId}/working-hours`, { hours }).then((r) => r.data);
+  api.put(`/businesses/${bizId}/staff/${staffId}/working-hours`, { hours }, { retryable: true }).then((r) => r.data);
 export const clearStaffWorkingHours = (bizId, staffId) =>
-  api.delete(`/businesses/${bizId}/staff/${staffId}/working-hours`);
+  api.delete(`/businesses/${bizId}/staff/${staffId}/working-hours`, { retryable: true });
 export const getBreaks = (bizId) => api.get(`/businesses/${bizId}/breaks`).then((r) => r.data);
 export const addBreak = (bizId, data) =>
   api.post(`/businesses/${bizId}/breaks`, data).then((r) => r.data);

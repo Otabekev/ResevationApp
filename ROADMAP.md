@@ -112,8 +112,14 @@ ships v1 as a background sender with delivery counters. Revisit when volume grow
 - **Availability endpoint batching** — the booking-engine availability query
   does per-staff round-trips (N+1); batch them. Measure after the SQL-echo fix
   before investing.
-- **Neon pooler endpoint** — confirm `DATABASE_URL` uses Neon's `-pooler` host
-  for cheaper, always-warm connections.
+- **Neon idle-suspend latency (the "schedule save felt slow" cause).** Neon's free
+  tier suspends compute after ~5 min idle; the first request after the owner has
+  been editing for a while eats the wake (a few seconds). The *failure* half (save
+  not landing → "try a few times") is fixed in code now (idempotent setup writes
+  auto-retry through blips — `client.js`). The *latency* half is operational:
+  **disable Neon scale-to-zero (always-on compute, paid)** and confirm
+  `DATABASE_URL` uses Neon's `-pooler` host for warm connections. Do before launch
+  so onboarding feels instant.
 - **Multi-instance-safe scheduler** *(proper-dev task, enables horizontal scale)* —
   today the scheduler / reminders / broadcast poller assume a single backend
   process; two instances would double-fire them. Add a DB lock or move these to a
