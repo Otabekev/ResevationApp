@@ -1,9 +1,10 @@
 import time
 from datetime import date, datetime
+from typing import Literal
 
-from fastapi import APIRouter, Depends, HTTPException, Query
+from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Query
 from fastapi.responses import JSONResponse
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 from sqlalchemy import desc, func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -11,10 +12,12 @@ from app.config import settings
 from app.database import get_db
 from app.deps import get_current_super_admin
 from app.models.booking import Booking, Customer
+from app.models.broadcast import Broadcast
 from app.models.business import Business, BusinessCategory
 from app.models.service import Service
 from app.models.staff import Staff
 from app.models.user import User
+from app.services import broadcast_service
 
 router = APIRouter(prefix="/admin", tags=["admin"])
 
@@ -406,3 +409,110 @@ async def growth_map(secret: str = Query(""), db: AsyncSession = Depends(get_db)
         content=cached,
         headers={"Access-Control-Allow-Origin": "*", "Cache-Control": "public, max-age=300"},
     )
+
+
+# ── Broadcasts (super-admin announcements to bot users) ──────────────────────
+
+class BroadcastCreate(BaseModel):
+    audience: Literal["all", "owners_staff", "customers"]
+    text: str = Field(min_length=1, max_length=4000)
+    # Naive datetimes are read as Tashkent local time; null/past = send now.
+    scheduled_at: datetime | None = None
+
+
+class BroadcastTest(BaseModel):
+    text: str = Field(min_length=1, max_length=4000)
+
+
+def _broadcast_out(b: Broadcast) -> dict:
+    return {
+        "id": b.id,
+        "audience": b.audience,
+        "text": b.text,
+        "status": b.status,
+        "scheduled_at": b.scheduled_at.isoformat() if b.scheduled_at else None,
+        "total_recipients": b.total_recipients,
+        "sent_count": b.sent_count,
+        "failed_count": b.failed_count,
+        "created_at": b.created_at.isoformat() if b.created_at else None,
+        "finished_at": b.finished_at.isoformat() if b.finished_at else None,
+    }
+
+
+@router.get("/broadcast/audience-counts")
+async def broadcast_audience_counts(
+    _: User = Depends(get_current_super_admin),
+    db: AsyncSession = Depends(get_db),
+):
+    """Recipient count per audience, for the pre-send preview."""
+    return await broadcast_service.count_audiences(db)
+
+
+@router.get("/broadcasts")
+async def list_broadcasts(
+    _: User = Depends(get_current_super_admin),
+    db: AsyncSession = Depends(get_db),
+):
+    rows = (
+        await db.execute(select(Broadcast).order_by(desc(Broadcast.created_at)).limit(50))
+    ).scalars().all()
+    return [_broadcast_out(b) for b in rows]
+
+
+@router.post("/broadcast")
+async def create_broadcast(
+    body: BroadcastCreate,
+    background: BackgroundTasks,
+    admin: User = Depends(get_current_super_admin),
+    db: AsyncSession = Depends(get_db),
+):
+    scheduled_at = broadcast_service.normalize_scheduled_at(body.scheduled_at)
+    now = broadcast_service._now_utc()
+    send_now = scheduled_at is None or scheduled_at <= now
+
+    b = Broadcast(
+        created_by=admin.id,
+        audience=body.audience,
+        text=body.text,
+        status="scheduled",
+        scheduled_at=None if send_now else scheduled_at,
+        total_recipients=await broadcast_service.audience_count(db, body.audience),
+    )
+    db.add(b)
+    await db.commit()
+    await db.refresh(b)
+
+    # "Send now" dispatches immediately in the background; a future schedule is
+    # left for the scheduler's poller to pick up at its time.
+    if send_now:
+        background.add_task(broadcast_service.run_broadcast, b.id)
+
+    return _broadcast_out(b)
+
+
+@router.post("/broadcast/test")
+async def send_broadcast_test(
+    body: BroadcastTest,
+    admin: User = Depends(get_current_super_admin),
+):
+    """Send the message only to the calling admin, to preview how it looks."""
+    if not admin.telegram_id:
+        raise HTTPException(status_code=400, detail="Your account has no Telegram chat to preview to.")
+    ok = await broadcast_service.send_test(admin.telegram_id, body.text)
+    return {"ok": ok}
+
+
+@router.post("/broadcasts/{broadcast_id}/cancel")
+async def cancel_broadcast(
+    broadcast_id: int,
+    _: User = Depends(get_current_super_admin),
+    db: AsyncSession = Depends(get_db),
+):
+    b = await db.get(Broadcast, broadcast_id)
+    if not b:
+        raise HTTPException(status_code=404)
+    if b.status != "scheduled":
+        raise HTTPException(status_code=400, detail="Only a scheduled broadcast can be cancelled.")
+    b.status = "cancelled"
+    await db.commit()
+    return {"ok": True, "status": b.status}

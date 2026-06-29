@@ -9,6 +9,17 @@ Things to tackle later. Newest ideas near the top of **Backlog**.
   up dummy data. **Right before July 20, wipe the test bookings** so launch starts
   clean. Nothing to build; just a cleanup pass.
   _(Claude: surface this reminder in any session as the date nears.)_
+- **Move Upstash Redis to a paid tier.** The bot's FSM state lives in Upstash, and
+  every tap reads/writes it. The free tier's daily command cap (~10k/day) gets
+  eaten by a few hundred *active* daily users — long before our 15k user target —
+  and a maxed-out Redis means **frozen buttons**, the worst possible launch look.
+  It's a cheap (~$10/mo) tier bump, not a rewrite. Do it before the launch push.
+  _(Claude: surface this with the test-bookings reminder as the date nears.)_
+- **Stay on ONE backend instance.** The scheduler, booking reminders, and the
+  broadcast poller all assume a single process — running two Railway instances
+  would double-fire reminders/broadcasts. One instance comfortably serves 15k
+  users; making it multi-instance-safe is a *post-launch / proper-dev* task (see
+  *Deferred performance / infra*). Until then: keep the backend at 1 instance.
 
 ## 🔜 In progress
 - **Pre-launch gate** — until 2026-07-20 the bot's customer booking flow is gated:
@@ -57,6 +68,17 @@ Today there's no streamlined way; arranging a call is manual back-and-forth.
 
 **Payoff:** retention. Reaching owners early is what stops churn.
 
+### Broadcast tool — later upgrades
+The super-admin broadcast (now/scheduled; everyone / owners+staff / customers)
+ships v1 as a background sender with delivery counters. Revisit when volume grows:
+- **Resumable outbox** — per-recipient rows so a mid-send restart resumes, instead
+  of relying on one background task (fine while sends are hundreds, not thousands).
+- **Customer opt-out** — a way for customers to stop marketing messages (Telegram
+  can ban a bot if mass messages get reported). Owner/staff + launch news is fine;
+  add opt-out before frequent customer promos.
+- **Per-language variants** — currently one message for all; add uz/ru/en versions
+  delivered by each user's language if customer marketing needs it.
+
 ### Investor growth map — later phases
 - **Phase 2:** growth-curve chart + bookings traction (total + per week) +
   momentum % (week-over-week) + retention (active vs churned).
@@ -74,3 +96,10 @@ Today there's no streamlined way; arranging a call is manual back-and-forth.
   before investing.
 - **Neon pooler endpoint** — confirm `DATABASE_URL` uses Neon's `-pooler` host
   for cheaper, always-warm connections.
+- **Multi-instance-safe scheduler** *(proper-dev task, enables horizontal scale)* —
+  today the scheduler / reminders / broadcast poller assume a single backend
+  process; two instances would double-fire them. Add a DB lock or move these to a
+  dedicated worker so the API can scale out past one instance. Not needed until
+  well beyond 15k users — but it's the gate to horizontal scaling.
+- **Resumable broadcast outbox** — see *Broadcast tool → later upgrades* above;
+  per-recipient rows so a mid-send restart resumes instead of truncating.
