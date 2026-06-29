@@ -67,6 +67,9 @@ class Business(Base):
     max_advance_booking_days: Mapped[int] = mapped_column(Integer, default=30)
     cancellation_policy_hours: Mapped[int] = mapped_column(Integer, default=2)
     slot_step_minutes: Mapped[int] = mapped_column(Integer, default=15)  # granularity for available slots
+    # Let a customer pick several services in one booking (done back-to-back by
+    # one staff member, summed duration/price). Off by default.
+    allow_multi_service: Mapped[bool] = mapped_column(Boolean, default=False, server_default="false")
 
     # Custom messaging
     custom_message_uz: Mapped[str | None] = mapped_column(Text, nullable=True)

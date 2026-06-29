@@ -1,12 +1,25 @@
 from datetime import date, datetime, time
 
 from sqlalchemy import (
-    BigInteger, Boolean, Date, DateTime, Enum,
-    ForeignKey, Integer, String, Text, Time, func,
+    BigInteger, Boolean, Column, Date, DateTime, Enum,
+    ForeignKey, Integer, String, Table, Text, Time, UniqueConstraint, func,
 )
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from app.database import Base
+
+
+# A booking can reference several services (multi-service bookings). The
+# primary/first service stays on Booking.service_id for backward compatibility;
+# this table lists ALL selected services. Deleting a booking cascades here.
+booking_services = Table(
+    "booking_services",
+    Base.metadata,
+    Column("id", Integer, primary_key=True),
+    Column("booking_id", Integer, ForeignKey("bookings.id", ondelete="CASCADE"), nullable=False, index=True),
+    Column("service_id", Integer, ForeignKey("services.id"), nullable=False, index=True),
+    UniqueConstraint("booking_id", "service_id", name="uq_booking_service"),
+)
 
 
 class Customer(Base):
@@ -80,6 +93,8 @@ class Booking(Base):
     # Relationships
     business = relationship("Business", back_populates="bookings")
     service = relationship("Service", back_populates="bookings")
+    # All services in this booking (multi-service); `service` above is the first.
+    services = relationship("Service", secondary=booking_services)
     staff = relationship("Staff", back_populates="bookings")
     customer = relationship("Customer", back_populates="bookings")
     review = relationship("Review", back_populates="booking", uselist=False)
