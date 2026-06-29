@@ -11,6 +11,7 @@ endpoint is the single source of truth the bot consults.
   J4. Before launch, a business OWNER is let through.
   J5. Before launch, an active STAFF member is let through.
   J6. Before launch, an INACTIVE staff member is still blocked.
+  J7. Before launch, a platform super-admin is let through (founder testing).
 """
 import pytest
 
@@ -87,3 +88,12 @@ async def test_j6_before_launch_inactive_staff_blocked(client, db, monkeypatch):
     r = await client.get(URL, params={"telegram_id": member.telegram_id})
     assert r.status_code == 200
     assert r.json()["open"] is False
+
+
+async def test_j7_before_launch_super_admin_allowed(client, monkeypatch):
+    # conftest sets SUPER_ADMIN_TELEGRAM_IDS=999000999. No business needed — the
+    # founder's account gets in by super-admin id alone.
+    monkeypatch.setattr(settings, "launch_date", FUTURE)
+    r = await client.get(URL, params={"telegram_id": 999000999})
+    assert r.status_code == 200
+    assert r.json() == {"open": True, "launched": False}

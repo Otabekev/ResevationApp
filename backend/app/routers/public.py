@@ -31,9 +31,11 @@ async def launch_status(
     if settings.has_launched:
         return {"open": True, "launched": True}
 
-    # Pre-launch: only business owners/staff may proceed.
+    # Pre-launch: only business owners/staff (and platform super-admins) may proceed.
     if telegram_id is None:
         return {"open": False, "launched": False}
+    if telegram_id in settings.super_admin_ids:
+        return {"open": True, "launched": False}
 
     user = (
         await db.execute(select(User).where(User.telegram_id == telegram_id))
