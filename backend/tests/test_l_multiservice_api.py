@@ -140,3 +140,37 @@ async def test_l5_toggle_off_ignores_extra_services(client, db):
         select(booking_services.c.service_id).where(booking_services.c.booking_id == bid)
     )).scalars().all()
     assert linked == [svc1.id]  # extra service dropped — toggle is authoritative
+
+
+async def test_l6_set_staff_services_adds_to_existing(client, db):
+    """Regression: a provider already assigned service A re-saves the set as
+    [A, B]. The endpoint must not 500 on the uq_staff_services unique constraint
+    — a blanket delete-then-reinsert flushes INSERT(A) before DELETE(old A) and
+    collides. This is the 'something went wrong' the owner hit when adding a 2nd
+    service to themselves."""
+    owner = await f.create_user(db, role="business_owner", telegram_id=706)
+    cat = await f.create_category(db)
+    biz = await f.create_business(db, owner_id=owner.id, category_id=cat.id)
+    svc_a = await f.create_service(db, business_id=biz.id, name="A")
+    svc_b = await f.create_service(db, business_id=biz.id, name="B")
+    staff = await f.create_staff(db, business_id=biz.id, user_id=owner.id)
+    await f.link_staff_service(db, staff_id=staff.id, service_id=svc_a.id)
+    await db.commit()
+
+    base = f"/api/v1/businesses/{biz.id}/staff/{staff.id}/services"
+    hdr = f.auth_header(owner.id)
+
+    # Add B while keeping the already-assigned A — used to 500.
+    r = await client.put(base, headers=hdr, json=[svc_a.id, svc_b.id])
+    assert r.status_code == 200, r.text
+    assert sorted(r.json()["service_ids"]) == sorted([svc_a.id, svc_b.id])
+
+    # Re-saving the identical set is idempotent (still no collision).
+    r_again = await client.put(base, headers=hdr, json=[svc_a.id, svc_b.id])
+    assert r_again.status_code == 200, r_again.text
+    assert sorted(r_again.json()["service_ids"]) == sorted([svc_a.id, svc_b.id])
+
+    # Removing one diffs cleanly down to just A.
+    r_rm = await client.put(base, headers=hdr, json=[svc_a.id])
+    assert r_rm.status_code == 200, r_rm.text
+    assert r_rm.json()["service_ids"] == [svc_a.id]

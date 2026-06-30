@@ -1,6 +1,6 @@
 from datetime import datetime
 
-from sqlalchemy import Boolean, DateTime, ForeignKey, Integer, String, Text, func
+from sqlalchemy import Boolean, DateTime, ForeignKey, Integer, String, Text, UniqueConstraint, func
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from app.database import Base
@@ -68,6 +68,12 @@ class StaffInvite(Base):
 class StaffService(Base):
     """Links a staff member to services they can perform."""
     __tablename__ = "staff_services"
+    # Matches the prod constraint added in migration 0002 (D7). Declared here so
+    # the test schema (built from models) enforces it too — otherwise a
+    # delete-then-reinsert that trips this constraint passes tests but 500s live.
+    __table_args__ = (
+        UniqueConstraint("staff_id", "service_id", name="uq_staff_services_staff_service"),
+    )
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True)
     staff_id: Mapped[int] = mapped_column(ForeignKey("staff.id"), nullable=False, index=True)

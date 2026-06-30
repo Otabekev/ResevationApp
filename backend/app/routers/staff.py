@@ -119,7 +119,7 @@ async def add_staff(
     db.add(staff)
     await db.flush()
 
-    for service_id in body.service_ids:
+    for service_id in set(body.service_ids):
         svc = await db.get(Service, service_id)
         if svc and svc.business_id == business_id:
             db.add(StaffService(staff_id=staff.id, service_id=service_id))
@@ -159,7 +159,7 @@ async def add_self_as_provider(
     db.add(staff)
     await db.flush()
 
-    for service_id in body.service_ids:
+    for service_id in set(body.service_ids):
         svc = await db.get(Service, service_id)
         if svc and svc.business_id == business_id:
             db.add(StaffService(staff_id=staff.id, service_id=service_id))
@@ -205,13 +205,24 @@ async def set_staff_services(
     if not staff or staff.business_id != business_id:
         raise HTTPException(status_code=404, detail="Staff not found")
 
-    # Remove old assignments
-    existing = await db.execute(select(StaffService).where(StaffService.staff_id == staff_id))
-    for ss in existing.scalars().all():
-        await db.delete(ss)
+    # Diff the assignment set instead of blanket delete-then-reinsert. A blanket
+    # rewrite trips the uq_staff_services_staff_service unique constraint, because
+    # SQLAlchemy flushes INSERTs before DELETEs — so re-adding an already-assigned
+    # service collides with its not-yet-deleted row and 500s. Diffing also avoids
+    # needless row churn.
+    requested = set(service_ids)
+    existing_rows = (
+        await db.execute(select(StaffService).where(StaffService.staff_id == staff_id))
+    ).scalars().all()
+    current = {ss.service_id for ss in existing_rows}
 
-    # Add new
-    for sid in service_ids:
+    # Drop assignments that are no longer wanted.
+    for ss in existing_rows:
+        if ss.service_id not in requested:
+            await db.delete(ss)
+
+    # Add only genuinely-new services that belong to this business.
+    for sid in requested - current:
         svc = await db.get(Service, sid)
         if svc and svc.business_id == business_id:
             db.add(StaffService(staff_id=staff_id, service_id=sid))
