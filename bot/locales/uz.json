@@ -69,6 +69,7 @@
   "setloc_failed": "⚠️ Joylashuvni saqlab bo'lmadi. Ilovadan qaytadan urinib ko'ring.",
   "setloc_invalid": "⚠️ Havola eskirgan. Ilovada «Telegram orqali joylashuv» tugmasini qayta bosing.",
   "welcome_book_cta": "Assalomu alaykum! 👋\nNavbatga yozilish uchun pastdagi «📅 Bron qilish» tugmasini bosing.",
+  "instructions": "ℹ️ <b>Yo'riqnoma — qanday bron qilish</b>\n\n1️⃣ Pastdagi «📅 Bron qilish» tugmasini bosing\n2️⃣ Tilni tanlang\n3️⃣ Biznes turi va biznesni tanlang\n4️⃣ Xizmat(lar), usta, sana va vaqtni tanlang\n5️⃣ Ism va telefon raqamingizni kiriting\n6️⃣ Tasdiqlang — tayyor! ✅\n\n📋 «Mening bronlarim» orqali bronlaringizni ko'rishingiz yoki bekor qilishingiz mumkin.",
   "prelaunch_wait": "🎉 Tez orada ochilamiz!\n\n«Qulay Navbat» 20-iyul kuni to'liq ishga tushadi. O'sha kundan boshlab shu yerdan bron qilishingiz mumkin bo'ladi.\n\nBiroz kuting — tez orada ko'rishamiz! 🙌",
   "min_suffix": "daq",
   "status_label": "Holati",

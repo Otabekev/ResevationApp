@@ -43,6 +43,12 @@ def format_booking(b: dict, lang: str) -> str:
 
 @router.callback_query(F.data == "my_bookings")
 async def my_bookings(callback: CallbackQuery, state: FSMContext) -> None:
+    await show_my_bookings(callback, state)
+
+
+async def show_my_bookings(callback: CallbackQuery, state: FSMContext) -> None:
+    """Render the user's upcoming bookings on the current message. Shared by the
+    inline 'my_bookings' button and the docked 'Mening bronlarim' menu button."""
     data = await state.get_data()
     lang = data.get("lang", "uz")
     access_token = data.get("access_token", "")

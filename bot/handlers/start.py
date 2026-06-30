@@ -63,16 +63,23 @@ def language_keyboard() -> InlineKeyboardMarkup:
     ])
 
 
-# Always-docked launch button. Constant Uzbek text so it reads the same before a
-# language is chosen, and `is_persistent` keeps it pinned above the input field
-# across the whole chat — so older users can start a booking anytime with one
-# tap, never needing to type /start.
+# Always-docked menu. Constant Uzbek text so it reads the same before a language
+# is chosen, and `is_persistent` keeps it pinned above the input field across the
+# whole chat — so older users can book, see their reservations, or read the guide
+# anytime with one tap, never needing to type /start. Each button asks for the
+# language first (just like /start), then routes on — see on_*_cta + set_language.
 BOOK_CTA_TEXT = "📅 Bron qilish"
+BOOKINGS_CTA_TEXT = "📋 Mening bronlarim"
+HELP_CTA_TEXT = "ℹ️ Yo'riqnoma"
 
 
 def booking_cta_keyboard() -> ReplyKeyboardMarkup:
     return ReplyKeyboardMarkup(
-        keyboard=[[KeyboardButton(text=BOOK_CTA_TEXT)]],
+        keyboard=[
+            [KeyboardButton(text=BOOK_CTA_TEXT)],
+            [KeyboardButton(text=BOOKINGS_CTA_TEXT)],
+            [KeyboardButton(text=HELP_CTA_TEXT)],
+        ],
         resize_keyboard=True,
         is_persistent=True,
         input_field_placeholder=BOOK_CTA_TEXT,
@@ -225,6 +232,24 @@ async def on_booking_cta(message: Message, state: FSMContext) -> None:
     await message.answer(t("choose_language", lang), reply_markup=language_keyboard())
 
 
+@router.message(F.text == BOOKINGS_CTA_TEXT)
+async def on_bookings_cta(message: Message, state: FSMContext) -> None:
+    """Docked 'Mening bronlarim' button → ask language, then show the user's
+    bookings (set_language refreshes auth first so the list never comes back
+    empty on a stale token)."""
+    lang = (await state.get_data()).get("lang", "uz")
+    await state.update_data(pending_action="my_bookings_flow")
+    await message.answer(t("choose_language", lang), reply_markup=language_keyboard())
+
+
+@router.message(F.text == HELP_CTA_TEXT)
+async def on_help_cta(message: Message, state: FSMContext) -> None:
+    """Docked 'Yo'riqnoma' button → ask language, then show the how-to-book guide."""
+    lang = (await state.get_data()).get("lang", "uz")
+    await state.update_data(pending_action="help_flow")
+    await message.answer(t("choose_language", lang), reply_markup=language_keyboard())
+
+
 @router.callback_query(F.data.startswith("weblogin_"))
 async def confirm_web_login(callback: CallbackQuery, state: FSMContext) -> None:
     """User tapped 'Yes, it's me' — tell the backend to release the web token."""
@@ -299,6 +324,31 @@ async def set_language(callback: CallbackQuery, state: FSMContext) -> None:
             f"🏪 <b>{esc(data.get('business_name', ''))}</b>\n📍 {esc(data.get('business_address', ''))}",
             parse_mode="HTML",
             reply_markup=InlineKeyboardMarkup(inline_keyboard=rows),
+        )
+    elif data.get("pending_action") == "my_bookings_flow":
+        await state.update_data(pending_action=None)
+        # Refresh auth so the bookings fetch has a valid token — the one from
+        # /start may have expired during think-time, which would otherwise show
+        # an empty list.
+        u = callback.from_user
+        try:
+            auth_data = await api_client.auth_user(u.id, u.full_name, u.username, new_lang)
+            await state.update_data(
+                access_token=auth_data["access_token"],
+                user_id=auth_data["user_id"],
+                role=auth_data["role"],
+            )
+        except Exception:
+            pass
+        from handlers.my_bookings import show_my_bookings
+        await show_my_bookings(callback, state)
+        return
+    elif data.get("pending_action") == "help_flow":
+        await state.update_data(pending_action=None)
+        await callback.message.edit_text(
+            t("instructions", new_lang),
+            parse_mode="HTML",
+            reply_markup=main_menu_keyboard(new_lang),
         )
     else:
         await callback.message.edit_text(
