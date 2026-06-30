@@ -1,3 +1,4 @@
+import asyncio
 import logging
 
 from aiogram import F, Router
@@ -19,6 +20,29 @@ from textutils import esc
 
 logger = logging.getLogger(__name__)
 router = Router()
+
+# Hold strong refs to in-flight fire-and-forget tasks. asyncio only keeps a weak
+# reference to a bare create_task(), so without this a background task can be
+# garbage-collected mid-flight and silently cancelled.
+_bg_tasks: set = set()
+
+
+def _fire_and_forget(coro) -> None:
+    task = asyncio.create_task(coro)
+    _bg_tasks.add(task)
+    task.add_done_callback(_bg_tasks.discard)
+
+
+async def _persist_language(token: str, language: str) -> None:
+    """Best-effort, off the critical path: tell the backend the user's language
+    so notifications match. Cosmetic — the FSM language is already set and every
+    /start re-syncs it via /auth/bot. A stale token (entering via the docked
+    button long after /start) makes this 401; firing it in the background means
+    that never costs the user a wasted round-trip before their screen loads."""
+    try:
+        await api_client.update_language(token, language)
+    except Exception:
+        pass
 
 
 def main_menu_keyboard(lang: str) -> InlineKeyboardMarkup:
@@ -238,14 +262,12 @@ async def set_language(callback: CallbackQuery, state: FSMContext) -> None:
         new_lang = "uz"
     await state.update_data(lang=new_lang)
 
-    # Persist to the backend so reminders/notifications switch language too.
+    # Persist to the backend so reminders/notifications switch language too —
+    # in the background, so the user's next screen never waits on this call.
     data = await state.get_data()
     token = data.get("access_token")
     if token:
-        try:
-            await api_client.update_language(token, new_lang)
-        except Exception:
-            pass  # cosmetic — the FSM language is already updated
+        _fire_and_forget(_persist_language(token, new_lang))
 
     # Route on after the language pick: launch button → category list; booking
     # deep-link → that business's card; otherwise → the main menu.
