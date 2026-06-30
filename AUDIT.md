@@ -1,6 +1,17 @@
 # Rezerv — Production-Readiness Hardening Audit
 
-> **Status:** Audit only. No code changed. Awaiting approval before any fixes.
+> ## ✅ HISTORICAL — these findings were FIXED on 2026-06-08
+> **This file is the pre-fix audit (2026-06-07). Do not read it as the current state of the app.**
+> Every Critical/High finding below was remediated the next day in commit `e4d1e09`, with a
+> failing→passing test for each. The fix-by-fix mapping lives in **[CHANGELOG_HARDENING.md](CHANGELOG_HARDENING.md)**.
+> Current proof: backend suite **`91 passed, 1 skipped`** locally; full suite (incl. the Postgres
+> double-booking concurrency test) **green in CI**. The **only** unbuilt item is **A7 (Postgres RLS)** —
+> defense-in-depth layered on already-proven app-level tenant isolation, not a launch blocker.
+> Kept for traceability so each fix maps back to the issue it closed.
+>
+> ---
+>
+> **Status (original):** Audit only. No code changed. Awaiting approval before any fixes.
 > **Scope:** Whole repo (backend, bot, frontend, infra) against categories A–K of the hardening prompt.
 > **Date:** 2026-06-07
 > **Reviewer hat:** staff-level security + backend + frontend. Goal = "50 paying businesses trust this with their bookings and customer data."
