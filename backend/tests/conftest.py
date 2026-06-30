@@ -52,7 +52,13 @@ async def engine():
 
 @pytest_asyncio.fixture
 async def sessionmaker_(engine):
-    return async_sessionmaker(engine, class_=AsyncSession, expire_on_commit=False)
+    # Mirror production's session semantics exactly (app/database.py): autoflush
+    # OFF. With autoflush ON (the default), a pending DELETE gets flushed before a
+    # later INSERT on the same unique key, hiding delete-then-reinsert bugs that
+    # 500 in prod. Keep these in sync so tests reproduce real behaviour.
+    return async_sessionmaker(
+        engine, class_=AsyncSession, expire_on_commit=False, autoflush=False
+    )
 
 
 @pytest_asyncio.fixture

@@ -3,10 +3,13 @@ Notification service — sends Telegram messages via Bot API.
 Used by the scheduler for reminders and by booking events for confirmations.
 """
 import html
+import logging
 
 import httpx
 
 from app.config import settings
+
+logger = logging.getLogger("rezerv.notify")
 
 
 def _esc(value: str) -> str:
@@ -23,8 +26,14 @@ async def send_telegram_message(
     parse_mode: str = "HTML",
     reply_markup: dict | None = None,
 ) -> bool:
-    """Sends a message via Telegram Bot API. Returns True on success."""
+    """Sends a message via Telegram Bot API. Returns True on success.
+
+    On failure it logs the reason (Telegram's error description) instead of
+    swallowing it silently, so a broadcast that reports "N failed" is always
+    diagnosable from the server logs (e.g. "bot was blocked by the user",
+    "chat not found")."""
     if not settings.telegram_bot_token:
+        logger.warning("Telegram bot token not configured — cannot message chat %s", chat_id)
         return False
 
     payload: dict = {"chat_id": chat_id, "text": text, "parse_mode": parse_mode}
@@ -34,8 +43,15 @@ async def send_telegram_message(
     try:
         async with httpx.AsyncClient(timeout=10) as client:
             resp = await client.post(f"{BOT_API_BASE}/sendMessage", json=payload)
-            return resp.status_code == 200
-    except Exception:
+            if resp.status_code != 200:
+                logger.warning(
+                    "Telegram sendMessage failed: chat=%s status=%s body=%s",
+                    chat_id, resp.status_code, resp.text[:300],
+                )
+                return False
+            return True
+    except Exception as exc:
+        logger.warning("Telegram sendMessage error: chat=%s err=%r", chat_id, exc)
         return False
 
 

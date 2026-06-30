@@ -91,6 +91,56 @@ async def _lang(state: FSMContext) -> str:
     return (await state.get_data()).get("lang", "uz")
 
 
+# ── Service-button label (protect the price) ─────────────────────────────────
+# Telegram renders an inline button on ONE line and ellipsizes from the RIGHT to
+# the button's pixel width (~20-34 visible chars on a mid-range Android). The
+# PRICE is the element customers need, so we place it on the LEFT — the edge
+# Telegram never clips — and truncate ONLY the name. Duration is intentionally
+# left off the button (it reappears on the slot picker, the confirmation screen,
+# and the multi-select running total), which frees room for the name.
+_SVC_NAME_BUDGET = 26   # max name chars before we truncate (generous; name is 2nd)
+_ELLIPSIS = "…"         # single code point (not "...") to spend the least width
+
+
+def _clip_name(name: str, budget: int = _SVC_NAME_BUDGET) -> str:
+    """Trim a service name to `budget` chars with a single-glyph ellipsis.
+    Strips the trailing space before the ellipsis so we never get 'Name …'."""
+    name = (name or "").strip()
+    if len(name) <= budget:
+        return name
+    return name[: budget - 1].rstrip() + _ELLIPSIS
+
+
+def _price_str(price, lang: str) -> str:
+    """Localized price, or '' when there is no usable price. Guards None / '' /
+    0 / non-numeric junk so one bad row degrades to name-only, never crashes the
+    keyboard build. Same int(float(...)):, formatting as the rest of the flow."""
+    if price in (None, "", 0, "0"):
+        return ""
+    try:
+        amount = int(float(price))
+    except (TypeError, ValueError):
+        return ""
+    return t("price_uzs", lang, amount=f"{amount:,}")
+
+
+def _svc_button_label(name: str, price, lang: str, mark: str = "") -> str:
+    """One inline-button label where the PRICE can never be the cut element.
+
+    Layout (left → right):  [mark ]PRICE · NAME
+      - price is on the protected LEFT edge (Telegram ellipsizes from the right),
+      - the ✅/⬜ `mark` (multi-select only) sits ahead of even the price,
+      - NAME is the only element ever truncated (single '…').
+    With no price we fall back to '[mark ]NAME' (no dangling ' · ').
+    Used by BOTH the single-service list and the multi-service checklist.
+    """
+    prefix = f"{mark} " if mark else ""
+    price_seg = _price_str(price, lang)
+    if not price_seg:
+        return f"{prefix}{_clip_name(name)}"
+    return f"{prefix}{price_seg} · {_clip_name(name)}"
+
+
 def _multiselect_kb(
     ms_list: list[dict], selected: list[int], lang: str, back_cb: str,
     business_id: int, has_location: bool = False,
@@ -101,10 +151,8 @@ def _multiselect_kb(
     rows = []
     for s in ms_list:
         mark = "✅" if s["id"] in sel else "⬜"
-        price = s.get("price")
-        price_str = f" • {t('price_uzs', lang, amount=f'{int(float(price)):,}')}" if price else ""
         rows.append([InlineKeyboardButton(
-            text=f"{mark} {s['name']} ({s['dur']} {t('min_suffix', lang)}){price_str}",
+            text=_svc_button_label(s["name"], s.get("price"), lang, mark=mark),
             callback_data=f"msvc_{s['id']}",
         )])
     # Continue row shows count + summed duration once something is picked.
@@ -309,10 +357,7 @@ async def business_chosen(callback: CallbackQuery, state: FSMContext) -> None:
 
     def svc_label(s):
         name = s.get(f"name_{lang}") or s.get("name_uz", "")
-        duration = s.get("duration_minutes", 0)
-        price = s.get("price")
-        price_str = f" • {t('price_uzs', lang, amount=f'{int(float(price)):,}')}" if price else ""
-        return f"{name} ({duration} {t('min_suffix', lang)}){price_str}"
+        return _svc_button_label(name, s.get("price"), lang)
 
     kb = paginate_buttons(services, "svc_", "id", svc_label, lang, back_cb=back_cb)
     # If this business has a location set, offer a "📍 view location" button (above
