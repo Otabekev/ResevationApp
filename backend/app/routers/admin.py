@@ -451,6 +451,42 @@ async def growth_map(secret: str = Query(""), db: AsyncSession = Depends(get_db)
                 "cum_bookings": cum_bk,
             })
 
+        # ── Extra investor signals ───────────────────────────────────────────
+        avg_bpb = round(total_bookings / active_businesses, 1) if active_businesses else 0.0
+
+        cat_rows = (
+            await db.execute(
+                select(BusinessCategory.name_en, func.count(Business.id))
+                .join(Business, Business.category_id == BusinessCategory.id)
+                .where(~Business.status.in_(["blocked", "suspended"]))
+                .group_by(BusinessCategory.name_en)
+                .order_by(func.count(Business.id).desc())
+                .limit(6)
+            )
+        ).all()
+        top_categories = [{"name": name or "Other", "count": cnt} for name, cnt in cat_rows]
+
+        region_rows = (
+            await db.execute(
+                select(Business.region)
+                .where(~Business.status.in_(["blocked", "suspended"]))
+                .group_by(Business.region)
+            )
+        ).all()
+        regions_with_businesses = sorted({r for (r,) in region_rows if r})
+
+        first_bk = await db.scalar(select(func.min(Booking.created_at)))
+        first_booking_date = first_bk.date().isoformat() if first_bk else None
+
+        top_performer_bookings = int(
+            await db.scalar(
+                select(func.count(Booking.id))
+                .group_by(Booking.business_id)
+                .order_by(func.count(Booking.id).desc())
+                .limit(1)
+            ) or 0
+        )
+
         cached = {
             "businesses": items,
             "max_week": max((i["week"] for i in items), default=1),
@@ -459,6 +495,11 @@ async def growth_map(secret: str = Query(""), db: AsyncSession = Depends(get_db)
                 "located_businesses": len(items),
                 "active_businesses": active_businesses,
                 "total_bookings": total_bookings,
+                "avg_bookings_per_business": avg_bpb,
+                "top_categories": top_categories,
+                "regions_with_businesses": regions_with_businesses,
+                "first_booking_date": first_booking_date,
+                "top_performer_bookings": top_performer_bookings,
                 "weekly": weekly,
             },
         }

@@ -61,7 +61,17 @@ async def test_m3_stats_block_shape(client, db, monkeypatch):
     await db.commit()
 
     stats = (await client.get(URL, params={"secret": SECRET})).json()["stats"]
-    for key in ("total_businesses", "located_businesses", "active_businesses", "total_bookings", "weekly"):
-        assert key in stats
+    for key in (
+        "total_businesses", "located_businesses", "active_businesses", "total_bookings",
+        "avg_bookings_per_business", "top_categories", "regions_with_businesses",
+        "first_booking_date", "top_performer_bookings", "weekly",
+    ):
+        assert key in stats, key
     assert isinstance(stats["weekly"], list) and stats["weekly"]
     assert {"week", "new_businesses", "cum_businesses", "bookings", "cum_bookings"} <= set(stats["weekly"][0])
+    # Investor signals derive correctly from the seeded business (no bookings yet).
+    assert stats["regions_with_businesses"] == ["Namangan"]
+    assert stats["top_categories"] and stats["top_categories"][0]["count"] == 1
+    assert stats["first_booking_date"] is None
+    assert stats["avg_bookings_per_business"] == 0.0
+    assert stats["top_performer_bookings"] == 0
