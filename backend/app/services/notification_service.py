@@ -36,7 +36,12 @@ async def send_telegram_message(
         logger.warning("Telegram bot token not configured — cannot message chat %s", chat_id)
         return False
 
-    payload: dict = {"chat_id": chat_id, "text": text, "parse_mode": parse_mode}
+    # Only send parse_mode when set. Broadcasts pass parse_mode=None (plain text);
+    # omitting the key entirely is cleaner than sending JSON null, so a null can
+    # never be a factor in a rejected send.
+    payload: dict = {"chat_id": chat_id, "text": text}
+    if parse_mode:
+        payload["parse_mode"] = parse_mode
     if reply_markup:
         payload["reply_markup"] = reply_markup
 

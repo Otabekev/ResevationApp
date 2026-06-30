@@ -62,7 +62,16 @@ async def main() -> None:
     ])
 
     logger.info("Bot starting...")
-    await dp.start_polling(bot, allowed_updates=["message", "callback_query"])
+    # drop_pending_updates: on every restart (each deploy restarts the bot),
+    # discard the taps that queued while it was down. Without this, a deploy's
+    # ~30s window of queued button taps all replay in a backlog on startup, so
+    # every button feels delayed for the first stretch after a deploy. A dropped
+    # tap just means the user taps again — far better than a stale backlog.
+    await dp.start_polling(
+        bot,
+        allowed_updates=["message", "callback_query"],
+        drop_pending_updates=True,
+    )
 
 
 if __name__ == "__main__":
