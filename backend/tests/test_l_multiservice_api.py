@@ -174,3 +174,34 @@ async def test_l6_set_staff_services_adds_to_existing(client, db):
     r_rm = await client.put(base, headers=hdr, json=[svc_a.id])
     assert r_rm.status_code == 200, r_rm.text
     assert r_rm.json()["service_ids"] == [svc_a.id]
+
+
+async def test_l7_bookings_list_shows_all_services(client, db):
+    """Regression: the owner's bookings list (and the web/bot display it feeds)
+    must show EVERY service of a multi-service booking, not just the primary."""
+    owner, biz, (svc1, svc2), staff = await _multi_biz(db, allow_multi=True, telegram_id=707)
+    svc1.name_uz = "Soch olish"
+    svc2.name_uz = "Soqol olish"
+    await db.commit()
+    soon = (date.today() + timedelta(days=3)).isoformat()
+
+    avail = await client.get(
+        "/api/v1/availability",
+        params={"business_id": biz.id, "service_id": svc1.id, "date": soon,
+                "service_ids": [svc1.id, svc2.id]},
+    )
+    start = avail.json()[0]["start_time"]
+    booked = await client.post(
+        "/api/v1/bookings/public",
+        headers=BOT_HEADERS,
+        json={"business_id": biz.id, "service_id": svc1.id, "service_ids": [svc1.id, svc2.id],
+              "booking_date": soon, "start_time": f"{start}:00",
+              "customer_name": "Multi", "customer_phone": "+998901112255", "telegram_id": 9907},
+    )
+    assert booked.status_code == 201, booked.text
+
+    lst = await client.get(f"/api/v1/businesses/{biz.id}/bookings", headers=f.auth_header(owner.id))
+    assert lst.status_code == 200
+    name = lst.json()[0]["service_name_uz"]
+    assert "Soch olish" in name and "Soqol olish" in name, name  # both shown
+    assert name.startswith("Soch olish")  # primary first

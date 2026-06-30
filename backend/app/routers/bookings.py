@@ -8,7 +8,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.database import get_db
 from app.deps import get_current_business_owner, get_current_user, require_bot_secret
 from app.limiter import limiter
-from app.models.booking import Booking, Customer
+from app.models.booking import Booking, Customer, booking_services
 from app.models.business import Business
 from app.models.service import Service
 from app.models.staff import Staff
@@ -160,6 +160,18 @@ def _svc_names(service: Service | None) -> dict[str, str]:
     return {"uz": service.name_uz, "ru": service.name_ru, "en": service.name_en}
 
 
+def _svc_names_all(services: list[Service]) -> dict[str, str]:
+    """Combined per-language names for a multi-service booking, e.g.
+    'Soch olish, Soqol olish'. One name for a single service; '—' for none."""
+    if not services:
+        return {"uz": "—", "ru": "—", "en": "—"}
+    return {
+        "uz": ", ".join(s.name_uz for s in services),
+        "ru": ", ".join(s.name_ru for s in services),
+        "en": ", ".join(s.name_en for s in services),
+    }
+
+
 # ── Public booking (Telegram bot) ────────────────────────────────────────────
 
 @router.post("/bookings/public", response_model=BookingOut, status_code=status.HTTP_201_CREATED)
@@ -221,11 +233,16 @@ async def create_public_booking(
 
     # Send confirmation to customer
     business = await db.get(Business, booking.business_id)
-    service = await db.get(Service, booking.service_id)
     staff = await db.get(Staff, booking.staff_id) if booking.staff_id else None
 
+    # Resolve every booked service (in order) so the confirmation and the owner
+    # alert list all of them, not just the primary.
+    svc_rows = await db.execute(select(Service).where(Service.id.in_(service_ids)))
+    svc_by_id = {s.id: s for s in svc_rows.scalars().all()}
+    ordered_services = [svc_by_id[sid] for sid in service_ids if sid in svc_by_id]
+
     lang = customer.language
-    names = _svc_names(service)
+    names = _svc_names_all(ordered_services)
     staff_name = staff.name if staff else "—"
 
     await send_telegram_message(
@@ -290,9 +307,22 @@ async def list_bookings(
     )
     bookings = result.scalars().all()
 
-    # Batch-resolve display names (no N+1)
-    svc_ids = {b.service_id for b in bookings}
+    # Batch-resolve display names (no N+1).
+    # All services per booking — multi-service bookings list every service, not
+    # just the primary. Legacy bookings with no booking_services rows fall back
+    # to their primary service_id.
+    booking_ids = [b.id for b in bookings]
+    links: dict[int, list[int]] = {}
+    if booking_ids:
+        bs_rows = await db.execute(
+            select(booking_services.c.booking_id, booking_services.c.service_id)
+            .where(booking_services.c.booking_id.in_(booking_ids))
+        )
+        for bid, sid in bs_rows.all():
+            links.setdefault(bid, []).append(sid)
+
     stf_ids = {b.staff_id for b in bookings if b.staff_id}
+    svc_ids = {b.service_id for b in bookings} | {sid for sids in links.values() for sid in sids}
     svc_map: dict[int, Service] = {}
     stf_map: dict[int, Staff] = {}
     if svc_ids:
@@ -302,14 +332,19 @@ async def list_bookings(
         rows = await db.execute(select(Staff).where(Staff.id.in_(stf_ids)))
         stf_map = {s.id: s for s in rows.scalars().all()}
 
+    def _ordered_services(b: Booking) -> list[Service]:
+        # Primary service first, then any other services linked to the booking.
+        sids = links.get(b.id) or [b.service_id]
+        ordered_ids = [b.service_id] + [s for s in sids if s != b.service_id]
+        return [svc_map[s] for s in ordered_ids if s in svc_map]
+
     out: list[BookingListItem] = []
     for b in bookings:
         item = BookingListItem.model_validate(b)
-        svc = svc_map.get(b.service_id)
-        if svc:
-            item.service_name_uz = svc.name_uz
-            item.service_name_ru = svc.name_ru
-            item.service_name_en = svc.name_en
+        names = _svc_names_all(_ordered_services(b))
+        item.service_name_uz = names["uz"]
+        item.service_name_ru = names["ru"]
+        item.service_name_en = names["en"]
         stf = stf_map.get(b.staff_id) if b.staff_id else None
         if stf:
             item.staff_name = stf.name
