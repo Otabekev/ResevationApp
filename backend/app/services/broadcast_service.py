@@ -12,9 +12,10 @@ import asyncio
 import logging
 from datetime import datetime, timedelta, timezone
 
-from sqlalchemy import func, select, update
+from sqlalchemy import select
 
 from app.database import AsyncSessionLocal
+from app.models.booking import Customer
 from app.models.broadcast import Broadcast
 from app.models.user import User
 from app.services.notification_service import send_telegram_message
@@ -25,14 +26,18 @@ logger = logging.getLogger("rezerv.broadcast")
 # time the admin enters as local Tashkent time.
 UZ_TZ = timezone(timedelta(hours=5))
 
-# Which user roles each audience targets. Super-admins are excluded from every
-# audience — the founder previews via the dedicated "send test to me" action,
-# so they never get blasted by their own "everyone" send.
-AUDIENCE_ROLES: dict[str, tuple[str, ...]] = {
-    "all": ("business_owner", "staff", "customer"),
-    "owners_staff": ("business_owner", "staff"),
-    "customers": ("customer",),
-}
+# Audience → set of Telegram chat ids, resolved at send time.
+#
+# IMPORTANT: the people who book through the bot are rows in the `customers`
+# table, NOT `users`. Only owners, staff and the founder are `users`. So the
+# customer audience is resolved from `customers` (plus any legacy User row
+# explicitly flagged role=customer), and owners/staff from `users`. This is the
+# bug that made every "customers"/"all" broadcast report 0 sent — it was querying
+# `users` for role=customer, where real customers never appear.
+#
+# Super-admins are excluded from every audience — the founder previews via the
+# dedicated "send test to me" action and never gets blasted by their own
+# "everyone" send, even if they also booked once and have a customer record.
 
 # Pace ~20 messages/sec — comfortably under Telegram's ~30/sec ceiling so a
 # bulk send doesn't trip rate limits.
@@ -54,30 +59,87 @@ def normalize_scheduled_at(value: datetime | None) -> datetime | None:
     return value
 
 
-def _audience_query(audience: str):
-    roles = AUDIENCE_ROLES[audience]
-    return (
-        User.telegram_id.isnot(None),
-        User.is_active == True,  # noqa: E712
-        User.role.in_(roles),
+def _clean(ids) -> set[int]:
+    """Keep only real, messageable chat ids — drop NULL and 0 (walk-in
+    customers created by an owner have no Telegram chat)."""
+    return {tid for tid in ids if tid}
+
+
+async def _owner_staff_ids(db) -> set[int]:
+    result = await db.execute(
+        select(User.telegram_id).where(
+            User.telegram_id.isnot(None),
+            User.is_active == True,  # noqa: E712
+            User.role.in_(("business_owner", "staff")),
+        )
     )
+    return _clean(tid for (tid,) in result.all())
+
+
+async def _customer_ids(db) -> set[int]:
+    ids: set[int] = set()
+    # Real customers: everyone who has booked through the bot.
+    cust = await db.execute(
+        select(Customer.telegram_id).where(Customer.telegram_id.isnot(None))
+    )
+    ids |= _clean(tid for (tid,) in cust.all())
+    # Legacy / explicitly-flagged User rows with role=customer (rare).
+    urows = await db.execute(
+        select(User.telegram_id).where(
+            User.telegram_id.isnot(None),
+            User.is_active == True,  # noqa: E712
+            User.role == "customer",
+        )
+    )
+    ids |= _clean(tid for (tid,) in urows.all())
+    return ids
+
+
+async def _superadmin_ids(db) -> set[int]:
+    result = await db.execute(
+        select(User.telegram_id).where(
+            User.telegram_id.isnot(None),
+            User.role == "super_admin",
+        )
+    )
+    return _clean(tid for (tid,) in result.all())
+
+
+async def _resolve_sets(db) -> tuple[set[int], set[int]]:
+    """Return (owners_staff, customers) chat-id sets with super-admins removed
+    from both, so a founder who also has a customer record is never targeted."""
+    admins = await _superadmin_ids(db)
+    owners_staff = await _owner_staff_ids(db) - admins
+    customers = await _customer_ids(db) - admins
+    return owners_staff, customers
+
+
+def _select_audience(audience: str, owners_staff: set[int], customers: set[int]) -> set[int]:
+    if audience == "owners_staff":
+        return set(owners_staff)
+    if audience == "customers":
+        return set(customers)
+    return owners_staff | customers  # "all" — deduped across both groups
 
 
 async def audience_count(db, audience: str) -> int:
-    conds = _audience_query(audience)
-    result = await db.execute(select(func.count()).select_from(User).where(*conds))
-    return int(result.scalar() or 0)
+    owners_staff, customers = await _resolve_sets(db)
+    return len(_select_audience(audience, owners_staff, customers))
 
 
 async def count_audiences(db) -> dict[str, int]:
     """Recipient count for each audience (for the admin's pre-send preview)."""
-    return {name: await audience_count(db, name) for name in AUDIENCE_ROLES}
+    owners_staff, customers = await _resolve_sets(db)
+    return {
+        "all": len(owners_staff | customers),
+        "owners_staff": len(owners_staff),
+        "customers": len(customers),
+    }
 
 
 async def _recipient_ids(db, audience: str) -> list[int]:
-    conds = _audience_query(audience)
-    result = await db.execute(select(User.telegram_id).where(*conds))
-    return [tid for (tid,) in result.all() if tid is not None]
+    owners_staff, customers = await _resolve_sets(db)
+    return list(_select_audience(audience, owners_staff, customers))
 
 
 async def run_broadcast(broadcast_id: int) -> None:

@@ -157,3 +157,49 @@ async def test_k7_run_broadcast_delivers_and_tallies(db, sessionmaker_, monkeypa
     assert refreshed.total_recipients == 2
     assert refreshed.sent_count == 2
     assert refreshed.failed_count == 0
+
+
+async def test_k8_customers_audience_reaches_customers_table(db, sessionmaker_, monkeypatch):
+    """Regression: real customers live in the `customers` table (created when they
+    book via the bot), NOT `users`. The customers/all audiences must reach them,
+    dedup against a User with the same telegram_id, and never include the founder
+    even when they also have a customer record. Previously this queried `users`
+    for role=customer and reported 0 sent."""
+    from app.models.booking import Customer
+
+    admin = await _admin(db)  # super-admin, telegram_id 9000
+    db.add_all([
+        Customer(telegram_id=501, name="RealCust"),
+        Customer(telegram_id=502, name="RealCust2"),
+        Customer(telegram_id=None, name="WalkIn"),        # no Telegram → excluded
+        Customer(telegram_id=9000, name="FounderAsCust"),  # super-admin → excluded
+    ])
+    # An owner who *also* booked once (same telegram_id 501) — must dedup.
+    await f.create_user(db, role="business_owner", telegram_id=501, name="OwnerWhoBooks")
+    await db.commit()
+
+    counts = await broadcast_service.count_audiences(db)
+    assert counts["customers"] == 2     # {501, 502}; 9000 + NULL excluded
+    assert counts["owners_staff"] == 1  # {501}
+    assert counts["all"] == 2           # {501, 502} after dedup
+
+    b = Broadcast(created_by=admin.id, audience="all", text="hello everyone", status="scheduled")
+    db.add(b)
+    await db.commit()
+    await db.refresh(b)
+
+    sent = []
+    async def _send(chat_id, text, parse_mode="HTML"):
+        sent.append(chat_id)
+        return True
+    monkeypatch.setattr(broadcast_service, "AsyncSessionLocal", sessionmaker_)
+    monkeypatch.setattr(broadcast_service, "send_telegram_message", _send)
+    monkeypatch.setattr(broadcast_service, "_SEND_INTERVAL_S", 0)
+
+    await broadcast_service.run_broadcast(b.id)
+
+    assert sorted(sent) == [501, 502]   # each once; founder (9000) never messaged
+    refreshed = await db.get(Broadcast, b.id)
+    await db.refresh(refreshed)
+    assert refreshed.sent_count == 2
+    assert refreshed.failed_count == 0
