@@ -1,3 +1,4 @@
+import re
 from datetime import date, time
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Request, status
@@ -29,6 +30,23 @@ router = APIRouter(tags=["bookings"])
 
 
 # ── Schemas ──────────────────────────────────────────────────────────────────
+
+_UZ_PHONE_RE = re.compile(r"^\+998\d{9}$")
+
+
+def _normalize_uz_phone(raw: str) -> str | None:
+    """Normalize an Uzbek number to canonical +998XXXXXXXXX, or None if it can't
+    be one. Accepts '+998901234567', '998901234567', '901234567', with spaces or
+    dashes — the same rule the bot uses — so a manual booking can't store junk
+    like 'asdf' the owner can never call back."""
+    digits = re.sub(r"[^\d]", "", raw or "")
+    if len(digits) == 9:
+        digits = "998" + digits
+    if len(digits) == 12 and digits.startswith("998"):
+        candidate = "+" + digits
+        return candidate if _UZ_PHONE_RE.match(candidate) else None
+    return None
+
 
 def _normalize_service_ids(self):
     """Keep service_id and service_ids consistent. With no list, default it to
@@ -74,6 +92,14 @@ class BookingCreateManual(BaseModel):
     customer_name: str = Field(..., min_length=1, max_length=255)
     customer_phone: str = Field(..., min_length=3, max_length=20)
     notes: str | None = Field(None, max_length=1000)
+
+    @field_validator("customer_phone")
+    @classmethod
+    def _valid_phone(cls, v: str) -> str:
+        normalized = _normalize_uz_phone(v)
+        if normalized is None:
+            raise ValueError("Enter a valid phone, e.g. +998 90 123 45 67")
+        return normalized
 
     _fill_service_ids = model_validator(mode="after")(_normalize_service_ids)
 
@@ -246,6 +272,7 @@ async def create_public_booking(
     lang = customer.language
     names = _svc_names_all(ordered_services)
     staff_name = staff.name if staff else "—"
+    total_price = sum(float(s.price) for s in ordered_services if s.price is not None)
 
     await send_telegram_message(
         customer.telegram_id,
@@ -256,6 +283,9 @@ async def create_public_booking(
             staff_name=staff_name,
             date_str=str(booking.booking_date),
             time_str=booking.start_time.strftime("%H:%M"),
+            address=business.address,
+            phone=business.phone,
+            price=total_price or None,
         ),
     )
 

@@ -154,6 +154,13 @@ export default function Bookings() {
       setModalError(t("pick_time_slot"));
       return;
     }
+    // Phone must be a real Uzbek number so it's callable later (a tel: link) —
+    // catch "asdf" here for instant feedback; the backend enforces it too.
+    const digits = (form.customer_phone || "").replace(/\D/g, "");
+    if (!(digits.length === 9 || (digits.length === 12 && digits.startsWith("998")))) {
+      setModalError(t("invalid_phone"));
+      return;
+    }
     setSaving(true);
     setModalError("");
     try {

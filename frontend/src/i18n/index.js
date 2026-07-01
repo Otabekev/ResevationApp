@@ -105,6 +105,7 @@ const translations = {
     choose_service_first: "Avval xizmatni tanlang",
     no_slots_day: "Bu kunda bo'sh vaqt yo'q",
     pick_time_slot: "Vaqtni tanlang",
+    invalid_phone: "To'g'ri telefon raqam kiriting, masalan +998 90 123 45 67",
     full_name: "Ism familiya",
 
     // Services
@@ -443,6 +444,7 @@ const translations = {
     choose_service_first: "Сначала выберите услугу",
     no_slots_day: "На этот день нет свободного времени",
     pick_time_slot: "Выберите время",
+    invalid_phone: "Введите корректный номер, например +998 90 123 45 67",
     full_name: "Имя и фамилия",
 
     new_service: "Новая услуга",
@@ -770,6 +772,7 @@ const translations = {
     choose_service_first: "Choose a service first",
     no_slots_day: "No free slots on this day",
     pick_time_slot: "Pick a time",
+    invalid_phone: "Enter a valid phone, e.g. +998 90 123 45 67",
     full_name: "Full name",
 
     new_service: "New service",
