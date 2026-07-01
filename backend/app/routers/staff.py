@@ -13,6 +13,7 @@ from app.models.business import Business
 from app.models.service import Service
 from app.models.staff import Staff, StaffInvite, StaffService
 from app.models.user import User
+from app.timeutils import now_local
 
 router = APIRouter(prefix="/businesses/{business_id}/staff", tags=["staff"])
 invite_router = APIRouter(tags=["staff"])
@@ -400,7 +401,7 @@ async def get_my_bookings(
     if booking_date:
         filters.append(Booking.booking_date == booking_date)
     else:
-        filters.append(Booking.booking_date >= date.today())
+        filters.append(Booking.booking_date >= now_local().date())
 
     result = await db.execute(
         select(Booking).where(and_(*filters)).order_by(Booking.booking_date, Booking.start_time)
