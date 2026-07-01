@@ -105,7 +105,20 @@ async def _send_reminders() -> None:
                         hours_until=hours_until,
                     )
 
-                    success = await send_telegram_message(customer.telegram_id, text)
+                    # A one-tap Cancel button on the reminder — a customer who
+                    # can't make it frees the slot instead of no-showing. Routes
+                    # to the bot's existing cancel_ask handler.
+                    cancel_label = {
+                        "uz": "❌ Bekor qilish", "ru": "❌ Отменить", "en": "❌ Cancel",
+                    }.get(lang, "❌ Bekor qilish")
+                    reminder_kb = {
+                        "inline_keyboard": [
+                            [{"text": cancel_label, "callback_data": f"cancel_ask_{booking.id}"}]
+                        ]
+                    }
+                    success = await send_telegram_message(
+                        customer.telegram_id, text, reply_markup=reminder_kb
+                    )
 
                     # On the 1-hour reminder (read right before heading out), also
                     # drop the business map pin for one-tap directions.

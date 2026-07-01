@@ -106,3 +106,21 @@ async def test_n3_walkin_pending_skipped_but_flagged(db, sessionmaker_, monkeypa
     refreshed = await db.get(Booking, booking.id)
     await db.refresh(refreshed)
     assert refreshed.reminder_24h_sent is True, "flag set so the row isn't rescanned forever"
+
+
+async def test_n4_reminder_carries_cancel_button(db, sessionmaker_, monkeypatch):
+    """The reminder must include a one-tap Cancel button routing to the bot's
+    cancel_ask handler — a can't-make-it customer frees the slot vs no-showing."""
+    booking, _ = await _booking_24h_out(db, status="confirmed", telegram_id=5580)
+    calls = []
+
+    async def _send(chat_id, *a, **k):
+        calls.append(k)
+        return True
+
+    _patch(monkeypatch, sessionmaker_, _send)
+    await scheduler._send_reminders()
+
+    kb = next((k.get("reply_markup") for k in calls if k.get("reply_markup")), None)
+    assert kb is not None, "reminder should carry an inline keyboard"
+    assert kb["inline_keyboard"][0][0]["callback_data"] == f"cancel_ask_{booking.id}"

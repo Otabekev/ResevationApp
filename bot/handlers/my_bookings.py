@@ -123,6 +123,17 @@ async def cancel_booking(callback: CallbackQuery, state: FSMContext) -> None:
     lang = data.get("lang", "uz")
     access_token = data.get("access_token", "")
 
+    # Refresh the token first — this can be reached from a 24h/1h reminder long
+    # after /start, when the token in state has expired. Without this the cancel
+    # would 401 and the customer couldn't free the slot.
+    u = callback.from_user
+    try:
+        auth = await api_client.auth_user(u.id, u.full_name, u.username, lang)
+        access_token = auth["access_token"]
+        await state.update_data(access_token=access_token, user_id=auth["user_id"], role=auth["role"])
+    except Exception:
+        pass  # fall back to whatever token we had
+
     try:
         await api_client.cancel_booking(booking_id, access_token)
         await callback.message.edit_text(
