@@ -103,5 +103,8 @@ class Business(Base):
         cascade="all, delete-orphan",
         overlaps="blocked_times",
     )
-    bookings = relationship("Booking", back_populates="business", cascade="all, delete-orphan")
+    # No delete-orphan cascade on bookings/reviews: booking history must survive
+    # even a stray db.delete(business). Deactivation is done via status
+    # (suspended/blocked), never a hard delete, and the DB FK blocks raw deletes.
+    bookings = relationship("Booking", back_populates="business")
     reviews = relationship("Review", back_populates="business")
