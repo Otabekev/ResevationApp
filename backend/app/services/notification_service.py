@@ -172,6 +172,45 @@ def review_prompt_message(lang: str, business_name: str, service_name: str, book
     return templates.get(lang, templates["uz"])
 
 
+def customer_cancelled_alert_message(
+    lang: str,
+    customer_name: str,
+    date_str: str,
+    time_str: str,
+    late_policy_hours: int | None = None,
+) -> str:
+    """Owner alert when a CUSTOMER cancels. If late_policy_hours is set, the
+    cancellation landed inside the business's cancellation window — flag it so the
+    owner knows the slot freed up late and may not get rebooked in time."""
+    customer_name = _esc(customer_name)
+    templates = {
+        "uz": (
+            f"❌ <b>Mijoz bronni bekor qildi</b>\n"
+            f"👤 {customer_name}\n"
+            f"📅 {date_str}  🕐 {time_str}"
+        ),
+        "ru": (
+            f"❌ <b>Клиент отменил запись</b>\n"
+            f"👤 {customer_name}\n"
+            f"📅 {date_str}  🕐 {time_str}"
+        ),
+        "en": (
+            f"❌ <b>Customer cancelled the booking</b>\n"
+            f"👤 {customer_name}\n"
+            f"📅 {date_str}  🕐 {time_str}"
+        ),
+    }
+    msg = templates.get(lang, templates["uz"])
+    if late_policy_hours is not None:
+        late_note = {
+            "uz": f"\n⚠️ Kech bekor qilindi (siyosatingiz: {late_policy_hours} soat).",
+            "ru": f"\n⚠️ Поздняя отмена (ваше правило: {late_policy_hours} ч).",
+            "en": f"\n⚠️ Late cancellation (your policy: {late_policy_hours}h).",
+        }.get(lang, f"\n⚠️ Kech bekor qilindi (siyosatingiz: {late_policy_hours} soat).")
+        msg += late_note
+    return msg
+
+
 def new_booking_alert_message(
     lang: str,
     customer_name: str,

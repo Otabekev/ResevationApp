@@ -14,9 +14,11 @@ from app.models.service import Service
 from app.models.staff import Staff
 from app.models.user import User
 from app.services.booking_engine import create_booking
+from app.timeutils import now_local, to_local
 from app.services.notification_service import (
     booking_confirmed_message,
     booking_cancelled_message,
+    customer_cancelled_alert_message,
     new_booking_alert_message,
     review_prompt_message,
     send_telegram_location,
@@ -539,13 +541,21 @@ async def cancel_booking(
                 await db.execute(select(User).where(User.id == business.owner_id))
             ).scalar_one_or_none()
         if owner and owner.telegram_id:
+            # Flag a LATE cancel — one that lands inside the business's
+            # cancellation window. We allow it (freeing the slot beats a silent
+            # no-show), but the owner is told so they can try to rebook the slot.
+            apt = to_local(booking.booking_date, booking.start_time)
+            hours_until = (apt - now_local()).total_seconds() / 3600
+            policy = business.cancellation_policy_hours if business else 0
+            is_late = policy and hours_until < policy
             await send_telegram_message(
                 owner.telegram_id,
-                booking_cancelled_message(
+                customer_cancelled_alert_message(
                     lang=owner.language,
-                    business_name=booking.customer_name,
+                    customer_name=booking.customer_name,
                     date_str=str(booking.booking_date),
                     time_str=booking.start_time.strftime("%H:%M"),
+                    late_policy_hours=policy if is_late else None,
                 ),
             )
 
@@ -567,7 +577,6 @@ async def get_customer_bookings(
     if user.telegram_id != telegram_id and user.role != "super_admin":
         raise HTTPException(status_code=403, detail="Forbidden")
 
-    from datetime import date as date_type
     customer = (
         await db.execute(select(Customer).where(Customer.telegram_id == telegram_id))
     ).scalar_one_or_none()
@@ -576,7 +585,9 @@ async def get_customer_bookings(
 
     filters = [Booking.customer_id == customer.id]
     if upcoming_only:
-        filters.append(Booking.booking_date >= date_type.today())
+        # Local (Asia/Tashkent) today, not server-local (UTC) — otherwise for ~5h
+        # every night a customer's "upcoming" list leaks yesterday's appointment.
+        filters.append(Booking.booking_date >= now_local().date())
         filters.append(Booking.status.in_(["pending", "confirmed"]))
 
     order = (
