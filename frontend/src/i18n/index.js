@@ -65,6 +65,11 @@ const translations = {
     actions: "Amallar",
     keep: "Qoldirish",
     yes_cancel: "Ha, bekor qilish",
+    cancel_reason_prompt: "Sabab (ixtiyoriy)",
+    cancel_reason_staff: "Usta band",
+    cancel_reason_closed: "Biznes yopiq",
+    cancel_reason_customer: "Mijoz so'radi",
+    cancel_reason_other: "Boshqa sabab",
 
     // Greetings
     greeting_morning: "Xayrli tong",
@@ -410,6 +415,11 @@ const translations = {
     actions: "Действия",
     keep: "Оставить",
     yes_cancel: "Да, отменить",
+    cancel_reason_prompt: "Причина (необязательно)",
+    cancel_reason_staff: "Мастер занят",
+    cancel_reason_closed: "Бизнес закрыт",
+    cancel_reason_customer: "Клиент попросил",
+    cancel_reason_other: "Другая причина",
 
     greeting_morning: "Доброе утро",
     greeting_day: "Добрый день",
@@ -740,6 +750,11 @@ const translations = {
     actions: "Actions",
     keep: "Keep",
     yes_cancel: "Yes, cancel",
+    cancel_reason_prompt: "Reason (optional)",
+    cancel_reason_staff: "Staff unavailable",
+    cancel_reason_closed: "Business closed",
+    cancel_reason_customer: "Customer requested",
+    cancel_reason_other: "Other reason",
 
     greeting_morning: "Good morning",
     greeting_day: "Good afternoon",
