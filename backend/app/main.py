@@ -127,12 +127,22 @@ app.include_router(invite_router,       prefix="/api/v1")
 
 @app.get("/health")
 async def health(db: AsyncSession = Depends(get_db)):
-    """Liveness + DB connectivity check."""
+    """Liveness + DB connectivity + reminder-scheduler heartbeat. Returns 503 if
+    the DB is unreachable OR the scheduler has silently died (no reminders)."""
+    from app.services.scheduler import scheduler_health
+
+    db_ok = True
     try:
         await db.execute(text("SELECT 1"))
     except Exception:
-        return JSONResponse(
-            status_code=503,
-            content={"status": "degraded", "db": False, "platform": settings.platform_name},
-        )
-    return {"status": "ok", "db": True, "platform": settings.platform_name}
+        db_ok = False
+
+    sched = scheduler_health()
+    healthy = db_ok and sched["healthy"]
+    body = {
+        "status": "ok" if healthy else "degraded",
+        "db": db_ok,
+        "scheduler": sched,
+        "platform": settings.platform_name,
+    }
+    return body if healthy else JSONResponse(status_code=503, content=body)

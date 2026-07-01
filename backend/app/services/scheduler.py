@@ -31,6 +31,25 @@ logger = logging.getLogger("rezerv.scheduler")
 
 scheduler = AsyncIOScheduler(timezone="Asia/Tashkent")
 
+# Heartbeat: updated after every reminder sweep (success OR handled error). If it
+# stops advancing, the scheduler has silently died — reminders would stop with no
+# other symptom, so /health watches it.
+last_reminder_run: datetime | None = None
+
+
+def scheduler_health() -> dict:
+    """Reminder-scheduler liveness for /health. Stale = the 15-min sweep hasn't
+    run in 20 min (dead scheduler / stuck loop). last_reminder_run is seeded at
+    start so a freshly-started scheduler isn't flagged before its first sweep."""
+    now = datetime.now(timezone.utc)
+    running = scheduler.running
+    stale = last_reminder_run is None or (now - last_reminder_run) > timedelta(minutes=20)
+    return {
+        "running": running,
+        "last_reminder_run": last_reminder_run.isoformat() if last_reminder_run else None,
+        "healthy": bool(running and not stale),
+    }
+
 
 async def _send_reminders() -> None:
     async with AsyncSessionLocal() as db:
@@ -155,10 +174,13 @@ async def _send_reminders() -> None:
 
 
 async def _send_reminders_safe() -> None:
+    global last_reminder_run
     try:
         await _send_reminders()
     except Exception:
         logger.exception("Reminder sweep failed")
+    finally:
+        last_reminder_run = datetime.now(timezone.utc)
 
 
 async def _send_due_broadcasts_safe() -> None:
@@ -170,6 +192,8 @@ async def _send_due_broadcasts_safe() -> None:
 
 
 def start_scheduler() -> None:
+    global last_reminder_run
+    last_reminder_run = datetime.now(timezone.utc)  # grace before the first sweep
     scheduler.add_job(
         _send_reminders_safe,
         "interval",
