@@ -3,7 +3,7 @@ from datetime import date, datetime, timedelta, timezone
 
 from fastapi import APIRouter, Depends, HTTPException, Query, status
 from pydantic import BaseModel
-from sqlalchemy import and_, select
+from sqlalchemy import and_, select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.database import get_db
@@ -230,6 +230,67 @@ async def set_staff_services(
     await db.commit()
     await db.refresh(staff)
     return await _staff_with_services(staff, db)
+
+
+@router.delete("/{staff_id}", status_code=status.HTTP_204_NO_CONTENT)
+async def delete_staff(
+    business_id: int,
+    staff_id: int,
+    user: User = Depends(get_current_business_owner),
+    db: AsyncSession = Depends(get_db),
+):
+    """Permanently remove a staff record. Two guards protect real data:
+      1. Must be inactive first — deactivate ('stop') is a distinct, reversible
+         step; delete is the final one, so it must be an explicit second action.
+      2. No active bookings — refuse if any pending/confirmed booking still
+         references this staff. Old bookings (completed / cancelled / no_show)
+         are detached (staff_id → NULL) so booking history is preserved.
+
+    Cascades handled automatically by the ORM (delete-orphan) for
+    staff_services / working_hours / blocked_times; invites are cleared here."""
+    await _get_owned_business(business_id, user, db)
+    staff = await db.get(Staff, staff_id)
+    if not staff or staff.business_id != business_id:
+        raise HTTPException(status_code=404, detail="Staff not found")
+    if staff.is_active:
+        raise HTTPException(
+            status_code=400,
+            detail="Stop this staff first, then delete.",
+        )
+
+    active_booking = (
+        await db.execute(
+            select(Booking.id)
+            .where(
+                and_(
+                    Booking.staff_id == staff_id,
+                    Booking.status.in_(("pending", "confirmed")),
+                )
+            )
+            .limit(1)
+        )
+    ).first()
+    if active_booking is not None:
+        raise HTTPException(
+            status_code=400,
+            detail="This staff has upcoming bookings. Cancel or complete them first.",
+        )
+
+    # Detach historical bookings so we preserve the record instead of failing on
+    # the FK. staff_id is nullable on bookings by design.
+    await db.execute(
+        update(Booking).where(Booking.staff_id == staff_id).values(staff_id=None)
+    )
+    # Clear invites (no cascade defined on this relationship).
+    invites = (
+        await db.execute(select(StaffInvite).where(StaffInvite.staff_id == staff_id))
+    ).scalars().all()
+    for inv in invites:
+        await db.delete(inv)
+
+    await db.delete(staff)
+    await db.commit()
+    return None
 
 
 @router.post("/{staff_id}/invite", response_model=InviteOut)

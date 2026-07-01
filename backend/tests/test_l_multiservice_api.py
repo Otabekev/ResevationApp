@@ -205,3 +205,78 @@ async def test_l7_bookings_list_shows_all_services(client, db):
     name = lst.json()[0]["service_name_uz"]
     assert "Soch olish" in name and "Soqol olish" in name, name  # both shown
     assert name.startswith("Soch olish")  # primary first
+
+
+async def test_l8_delete_inactive_staff_removes_them(client, db):
+    """Delete requires staff to be inactive first (stop → delete two-step).
+    Cascades staff_services/working_hours; historical bookings are detached."""
+    from datetime import time as _time
+    from app.models.staff import Staff, StaffService
+    from app.models.schedule import WorkingHours
+
+    owner = await f.create_user(db, role="business_owner", telegram_id=708)
+    cat = await f.create_category(db)
+    biz = await f.create_business(db, owner_id=owner.id, category_id=cat.id)
+    svc = await f.create_service(db, business_id=biz.id)
+    stf = await f.create_staff(db, business_id=biz.id, name="Barber")
+    await f.link_staff_service(db, staff_id=stf.id, service_id=svc.id)
+    db.add(WorkingHours(business_id=biz.id, staff_id=stf.id,
+                        day_of_week=0, start_time=_time(9, 0), end_time=_time(18, 0)))
+    await db.commit()
+
+    hdr = f.auth_header(owner.id)
+    url = f"/api/v1/businesses/{biz.id}/staff/{stf.id}"
+
+    # Active staff cannot be deleted — must be stopped first.
+    r1 = await client.delete(url, headers=hdr)
+    assert r1.status_code == 400
+    assert "stop" in r1.json()["detail"].lower()
+
+    # Stop them, then delete.
+    await client.patch(url, headers=hdr, json={"is_active": False})
+    r2 = await client.delete(url, headers=hdr)
+    assert r2.status_code == 204, r2.text
+
+    # Row and its cascades are gone.
+    assert (await db.execute(select(Staff).where(Staff.id == stf.id))).scalar_one_or_none() is None
+    ss = (await db.execute(select(StaffService).where(StaffService.staff_id == stf.id))).scalars().all()
+    assert ss == []
+    wh = (await db.execute(select(WorkingHours).where(WorkingHours.staff_id == stf.id))).scalars().all()
+    assert wh == []
+
+
+async def test_l9_delete_blocked_by_active_bookings(client, db):
+    """A staff with pending/confirmed bookings can't be deleted; completed ones
+    don't block delete — they're detached (staff_id → NULL) to preserve history."""
+    from datetime import time as _time
+    from app.models.booking import Booking
+
+    owner = await f.create_user(db, role="business_owner", telegram_id=709)
+    cat = await f.create_category(db)
+    biz = await f.create_business(db, owner_id=owner.id, category_id=cat.id)
+    svc = await f.create_service(db, business_id=biz.id)
+    stf = await f.create_staff(db, business_id=biz.id, name="Barber")
+    cust = await f.create_customer(db, telegram_id=1001)
+    active = await f.create_booking(db, business_id=biz.id, staff_id=stf.id, service_id=svc.id,
+                                    customer_id=cust.id, status="confirmed")
+    stf.is_active = False
+    await db.commit()
+
+    hdr = f.auth_header(owner.id)
+    url = f"/api/v1/businesses/{biz.id}/staff/{stf.id}"
+
+    # Confirmed booking blocks delete.
+    r1 = await client.delete(url, headers=hdr)
+    assert r1.status_code == 400
+    assert "upcoming" in r1.json()["detail"].lower() or "cancel" in r1.json()["detail"].lower()
+
+    # Move the booking to a completed state — now delete succeeds and the
+    # booking's staff_id is detached rather than deleted (history preserved).
+    active.status = "completed"
+    await db.commit()
+    r2 = await client.delete(url, headers=hdr)
+    assert r2.status_code == 204, r2.text
+
+    b = await db.get(Booking, active.id)
+    await db.refresh(b)
+    assert b is not None and b.staff_id is None
