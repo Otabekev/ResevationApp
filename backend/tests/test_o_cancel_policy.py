@@ -77,3 +77,36 @@ async def test_o2_early_cancel_allowed_no_late_flag(client, db, monkeypatch):
     owner_msgs = [txt for (cid, txt) in sent if cid == owner.telegram_id]
     assert owner_msgs, "owner should still be notified"
     assert "Kech" not in owner_msgs[0], f"early cancel must NOT be flagged late: {owner_msgs[0]!r}"
+
+
+async def test_o3_owner_cancel_reports_customer_notified(client, db, monkeypatch):
+    """Owner cancels a bot customer's booking → response says the customer was
+    notified, so the UI can reassure the owner."""
+    _capture(monkeypatch)  # stubbed sender returns True
+    owner, _, booking = await _setup(db, hours_out=8, telegram_base=8020, policy=2)
+    r = await client.patch(
+        f"/api/v1/bookings/{booking.id}/cancel",
+        headers=f.auth_header(owner.id), json={"reason": "closed today"},
+    )
+    assert r.status_code == 200, r.text
+    assert r.json()["status"] == "cancelled_by_business"
+    assert r.json()["customer_notified"] is True
+
+
+async def test_o4_owner_cancel_walkin_not_notified(client, db, monkeypatch):
+    """A walk-in (no Telegram) can't be notified — the flag stays honest."""
+    from app.models.booking import Customer
+
+    _capture(monkeypatch)
+    owner, _, booking = await _setup(db, hours_out=8, telegram_base=8030, policy=2)
+    cust = await db.get(Customer, booking.customer_id)
+    cust.telegram_id = None
+    await db.commit()
+
+    r = await client.patch(
+        f"/api/v1/bookings/{booking.id}/cancel",
+        headers=f.auth_header(owner.id), json={"reason": "closed today"},
+    )
+    assert r.status_code == 200, r.text
+    assert r.json()["status"] == "cancelled_by_business"
+    assert r.json()["customer_notified"] is False

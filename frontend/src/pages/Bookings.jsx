@@ -132,9 +132,14 @@ export default function Bookings() {
 
   const handleCancel = async (bookingId) => {
     try {
-      await cancelBooking(bookingId);
+      const res = await cancelBooking(bookingId);
       setConfirmCancelId(null);
-      setToast({ message: t("booking_cancelled_toast"), variant: "success" });
+      // Reassure the owner the customer actually got the message — but stay
+      // honest for a walk-in with no Telegram (customer_notified === false).
+      setToast({
+        message: res?.customer_notified ? t("booking_cancelled_notified") : t("booking_cancelled_toast"),
+        variant: "success",
+      });
       await load();
     } catch {
       setToast({ message: t("error"), variant: "error" });

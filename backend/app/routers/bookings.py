@@ -517,7 +517,7 @@ async def update_booking_status(
     return booking
 
 
-@router.patch("/bookings/{booking_id}/cancel", response_model=BookingOut)
+@router.patch("/bookings/{booking_id}/cancel", response_model=None)
 async def cancel_booking(
     booking_id: int,
     body: CancelRequest,
@@ -553,9 +553,12 @@ async def cancel_booking(
     await db.commit()
     await db.refresh(booking)
 
-    # Notify the other party
+    # Notify the other party. customer_notified lets the owner's UI reassure them
+    # the customer actually got the message — and stay honest for a walk-in who
+    # has no Telegram (never notified).
+    customer_notified = False
     if booking.status == "cancelled_by_business" and customer and customer.telegram_id:
-        await send_telegram_message(
+        customer_notified = await send_telegram_message(
             customer.telegram_id,
             booking_cancelled_message(
                 lang=customer.language,
@@ -589,7 +592,9 @@ async def cancel_booking(
                 ),
             )
 
-    return booking
+    out = BookingOut.model_validate(booking).model_dump(mode="json")
+    out["customer_notified"] = bool(customer_notified)
+    return out
 
 
 # ── Customer: own bookings ────────────────────────────────────────────────────
