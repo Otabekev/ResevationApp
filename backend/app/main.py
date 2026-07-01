@@ -52,6 +52,9 @@ app = FastAPI(
     lifespan=lifespan,
     docs_url="/docs" if not settings.is_production else None,
     redoc_url="/redoc" if not settings.is_production else None,
+    # Also close the raw schema in prod — /docs/redoc render it, so leaving
+    # /openapi.json open would still expose the full API surface.
+    openapi_url="/openapi.json" if not settings.is_production else None,
 )
 
 app.state.limiter = limiter
