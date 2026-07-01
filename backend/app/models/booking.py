@@ -2,7 +2,7 @@ from datetime import date, datetime, time
 
 from sqlalchemy import (
     BigInteger, Boolean, Column, Date, DateTime, Enum,
-    ForeignKey, Integer, String, Table, Text, Time, UniqueConstraint, func,
+    ForeignKey, Integer, Numeric, String, Table, Text, Time, UniqueConstraint, func,
 )
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
@@ -57,6 +57,11 @@ class Booking(Base):
     booking_date: Mapped[date] = mapped_column(Date, nullable=False, index=True)
     start_time: Mapped[time] = mapped_column(Time, nullable=False)
     end_time: Mapped[time] = mapped_column(Time, nullable=False)  # start_time + duration_minutes
+
+    # Price frozen at booking time, so a later service price change never
+    # rewrites what this booking cost (keeps future revenue reporting accurate).
+    # Duration needs no snapshot — end_time already captures it at insert.
+    total_price_at_booking: Mapped[float | None] = mapped_column(Numeric(10, 2), nullable=True)
 
     status: Mapped[str] = mapped_column(
         Enum(

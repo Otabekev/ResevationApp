@@ -549,6 +549,8 @@ async def create_booking(
 
     # Insert booking — caller must commit. service_id stays the FIRST service for
     # backward compatibility; every selected service is linked below.
+    # Freeze the total price now — services are already loaded above.
+    total_price = sum(float(s.price) for s in services if s.price is not None)
     booking = Booking(
         business_id=business_id,
         service_id=ids[0],
@@ -562,6 +564,7 @@ async def create_booking(
         status="pending" if any(s.requires_confirmation for s in services) else "confirmed",
         notes=notes,
         was_auto_assigned=auto_assigned,
+        total_price_at_booking=total_price or None,
     )
     db.add(booking)
     try:

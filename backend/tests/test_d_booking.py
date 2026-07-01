@@ -297,3 +297,56 @@ async def test_concurrent_booking_single_winner():
     results = await asyncio.gather(*[attempt() for _ in range(8)])
     await eng.dispose()
     assert sum(results) == 1, f"expected exactly one winner, got {sum(results)}"
+
+
+@pytest.mark.postgres
+async def test_duplicate_customer_slot_rejected_across_staff():
+    """A retry that lands on a DIFFERENT auto-assigned staff must not create a
+    second booking for the same customer + slot. Requires Postgres (the partial
+    unique index uq_active_booking_customer_slot from migration 0008)."""
+    import os
+
+    from sqlalchemy import text
+    from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
+
+    from app.database import Base
+    from app.models.booking import Customer
+
+    pg_url = os.environ.get("TEST_DATABASE_URL")
+    if not pg_url:
+        pytest.skip("set TEST_DATABASE_URL to a Postgres URL to run this test")
+
+    eng = create_async_engine(pg_url)
+    async with eng.begin() as conn:
+        await conn.run_sync(Base.metadata.drop_all)
+        await conn.run_sync(Base.metadata.create_all)
+        await conn.execute(text(
+            "CREATE UNIQUE INDEX uq_active_booking_customer_slot "
+            "ON bookings (customer_id, business_id, booking_date, start_time) "
+            "WHERE status IN ('pending','confirmed') AND customer_id IS NOT NULL"
+        ))
+
+    maker = async_sessionmaker(eng, class_=AsyncSession, expire_on_commit=False)
+    async with maker() as s:
+        biz, svc, staff, cust = await _setup(s, min_advance=0)
+        staff2 = await create_staff(s, business_id=biz.id, name="Barber2")
+        await link_staff_service(s, staff_id=staff2.id, service_id=svc.id)
+        await s.commit()
+        biz_id, svc_id, staff_id, staff2_id, cust_id = biz.id, svc.id, staff.id, staff2.id, cust.id
+
+    soon = date.today() + timedelta(days=2)
+    async with maker() as s:
+        cust = await s.get(Customer, cust_id)
+        await create_booking(s, business_id=biz_id, service_id=svc_id, staff_id=staff_id,
+                             customer=cust, booking_date=soon, start_time=time(10, 0))
+        await s.commit()
+
+    # The retry gets the OTHER staff — the staff-keyed EXCLUDE wouldn't catch it,
+    # but the customer+slot index must.
+    with pytest.raises(ValueError):
+        async with maker() as s:
+            cust = await s.get(Customer, cust_id)
+            await create_booking(s, business_id=biz_id, service_id=svc_id, staff_id=staff2_id,
+                                 customer=cust, booking_date=soon, start_time=time(10, 0))
+            await s.commit()
+    await eng.dispose()
