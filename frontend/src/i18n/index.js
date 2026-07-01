@@ -65,6 +65,11 @@ const translations = {
     actions: "Amallar",
     keep: "Qoldirish",
     yes_cancel: "Ha, bekor qilish",
+    cancel_reason_prompt: "Sabab (ixtiyoriy)",
+    cancel_reason_staff: "Usta band",
+    cancel_reason_closed: "Biznes yopiq",
+    cancel_reason_customer: "Mijoz so'radi",
+    cancel_reason_other: "Boshqa sabab",
 
     // Greetings
     greeting_morning: "Xayrli tong",
@@ -100,11 +105,13 @@ const translations = {
     no_bookings_for_day_sub: "Boshqa kunni tanlang yoki qo'lda bron qo'shing",
     booking_created: "Bron yaratildi",
     booking_cancelled_toast: "Bron bekor qilindi",
+    booking_cancelled_notified: "Bron bekor qilindi — mijozga xabar yuborildi",
     select_service: "Xizmatni tanlang",
     any_available: "Istalgan bo'sh xodim",
     choose_service_first: "Avval xizmatni tanlang",
     no_slots_day: "Bu kunda bo'sh vaqt yo'q",
     pick_time_slot: "Vaqtni tanlang",
+    invalid_phone: "To'g'ri telefon raqam kiriting, masalan +998 90 123 45 67",
     full_name: "Ism familiya",
 
     // Services
@@ -176,6 +183,7 @@ const translations = {
 
     // Analytics
     analytics_subtitle: "Biznesingiz qanday ishlayotganini ko'ring",
+    analytics_empty_title: "Hali ma'lumot yo'q",
     total_bookings: "Jami bronlar",
     confirmed_completed: "Tasdiqlangan + tugallangan",
     no_show_rate: "Kelmaganlar",
@@ -407,6 +415,11 @@ const translations = {
     actions: "Действия",
     keep: "Оставить",
     yes_cancel: "Да, отменить",
+    cancel_reason_prompt: "Причина (необязательно)",
+    cancel_reason_staff: "Мастер занят",
+    cancel_reason_closed: "Бизнес закрыт",
+    cancel_reason_customer: "Клиент попросил",
+    cancel_reason_other: "Другая причина",
 
     greeting_morning: "Доброе утро",
     greeting_day: "Добрый день",
@@ -438,11 +451,13 @@ const translations = {
     no_bookings_for_day_sub: "Выберите другой день или добавьте запись вручную",
     booking_created: "Запись создана",
     booking_cancelled_toast: "Запись отменена",
+    booking_cancelled_notified: "Запись отменена — клиент уведомлён",
     select_service: "Выберите услугу",
     any_available: "Любой свободный",
     choose_service_first: "Сначала выберите услугу",
     no_slots_day: "На этот день нет свободного времени",
     pick_time_slot: "Выберите время",
+    invalid_phone: "Введите корректный номер, например +998 90 123 45 67",
     full_name: "Имя и фамилия",
 
     new_service: "Новая услуга",
@@ -510,6 +525,7 @@ const translations = {
     reason_optional: "Причина (необязательно)",
 
     analytics_subtitle: "Как работает ваш бизнес",
+    analytics_empty_title: "Пока нет данных",
     total_bookings: "Всего записей",
     confirmed_completed: "Подтверждено + завершено",
     no_show_rate: "Не пришли",
@@ -734,6 +750,11 @@ const translations = {
     actions: "Actions",
     keep: "Keep",
     yes_cancel: "Yes, cancel",
+    cancel_reason_prompt: "Reason (optional)",
+    cancel_reason_staff: "Staff unavailable",
+    cancel_reason_closed: "Business closed",
+    cancel_reason_customer: "Customer requested",
+    cancel_reason_other: "Other reason",
 
     greeting_morning: "Good morning",
     greeting_day: "Good afternoon",
@@ -765,11 +786,13 @@ const translations = {
     no_bookings_for_day_sub: "Pick another day or add a booking manually",
     booking_created: "Booking created",
     booking_cancelled_toast: "Booking cancelled",
+    booking_cancelled_notified: "Booking cancelled — customer notified",
     select_service: "Select a service",
     any_available: "Any available",
     choose_service_first: "Choose a service first",
     no_slots_day: "No free slots on this day",
     pick_time_slot: "Pick a time",
+    invalid_phone: "Enter a valid phone, e.g. +998 90 123 45 67",
     full_name: "Full name",
 
     new_service: "New service",
@@ -837,6 +860,7 @@ const translations = {
     reason_optional: "Reason (optional)",
 
     analytics_subtitle: "How your business is doing",
+    analytics_empty_title: "No data yet",
     total_bookings: "Total bookings",
     confirmed_completed: "Confirmed + completed",
     no_show_rate: "No-show rate",

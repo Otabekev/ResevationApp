@@ -52,6 +52,16 @@ def main_menu_button(lang: str) -> list[list[InlineKeyboardButton]]:
     return [[InlineKeyboardButton(text=t("back", lang), callback_data="main_menu")]]
 
 
+def _entry_nav_kb(lang: str, with_back: bool = False) -> InlineKeyboardMarkup:
+    """Nav buttons for the free-text entry steps (name / phone) so a customer who
+    mistyped isn't stuck: Back returns to the name step, Cancel aborts the flow."""
+    rows = []
+    if with_back:
+        rows.append([InlineKeyboardButton(text=t("back", lang), callback_data="entry_back_name")])
+    rows.append([InlineKeyboardButton(text=t("cancel", lang), callback_data="book_abort")])
+    return InlineKeyboardMarkup(inline_keyboard=rows)
+
+
 def paginate_buttons(
     items: list[dict],
     cb_prefix: str,
@@ -587,7 +597,7 @@ async def time_chosen(callback: CallbackQuery, state: FSMContext) -> None:
     await state.update_data(start_time=start_time)
 
     lang = await _lang(state)
-    await callback.message.edit_text(t("enter_name", lang))
+    await callback.message.edit_text(t("enter_name", lang), reply_markup=_entry_nav_kb(lang))
     await state.set_state(BookingFSM.entering_name)
 
 
@@ -600,11 +610,38 @@ async def name_entered(message: Message, state: FSMContext) -> None:
     lang = (await state.get_data()).get("lang", "uz")
     name = (message.text or "").strip()
     if not (2 <= len(name) <= 100):
-        await message.answer(t("invalid_name", lang))
+        await message.answer(t("invalid_name", lang), reply_markup=_entry_nav_kb(lang))
         return
     await state.update_data(customer_name=name)
-    await message.answer(t("enter_phone", lang))
+    await message.answer(t("enter_phone", lang), reply_markup=_entry_nav_kb(lang, with_back=True))
     await state.set_state(BookingFSM.entering_phone)
+
+
+@router.callback_query(F.data == "entry_back_name")
+async def entry_back_name(callback: CallbackQuery, state: FSMContext) -> None:
+    """Customer tapped Back on the phone step → re-ask the name."""
+    await callback.answer()
+    lang = await _lang(state)
+    await callback.message.edit_text(t("enter_name", lang), reply_markup=_entry_nav_kb(lang))
+    await state.set_state(BookingFSM.entering_name)
+
+
+@router.callback_query(F.data == "book_abort")
+async def book_abort(callback: CallbackQuery, state: FSMContext) -> None:
+    """Cancel the in-progress booking from a name/phone step and return to the
+    main menu (nothing was created yet — just clears the draft)."""
+    await callback.answer()
+    lang = await _lang(state)
+    await state.set_state(None)
+    await state.update_data(
+        booking_date=None, start_time=None, service_id=None, staff_id=None,
+        service_name=None, staff_name=None, service_price=None,
+        service_ids=None, selected_services=[], customer_name=None,
+    )
+    from handlers.start import main_menu_keyboard
+    await callback.message.edit_text(
+        t("start", lang), parse_mode="HTML", reply_markup=main_menu_keyboard(lang),
+    )
 
 
 # ── Phone entered → show summary ─────────────────────────────────────────────
@@ -616,7 +653,7 @@ async def phone_entered(message: Message, state: FSMContext) -> None:
 
     phone = normalize_phone(message.text or "")
     if phone is None:
-        await message.answer(t("invalid_phone", lang))
+        await message.answer(t("invalid_phone", lang), reply_markup=_entry_nav_kb(lang, with_back=True))
         return
 
     # Name was collected in the previous step; only fall back to the Telegram
@@ -685,10 +722,13 @@ async def booking_confirm(callback: CallbackQuery, state: FSMContext) -> None:
             "language": lang,
         })
         result_text = t("booking_confirmed", lang)
+        booking_ok = True
     except ValueError:
         result_text = t("slot_taken", lang)
+        booking_ok = False
     except Exception:
         result_text = t("booking_failed", lang)
+        booking_ok = False
 
     # Keep lang/auth in state but clear the FSM step + booking draft.
     await state.set_state(None)
@@ -698,9 +738,12 @@ async def booking_confirm(callback: CallbackQuery, state: FSMContext) -> None:
         service_ids=None, selected_services=[],
     )
 
+    # On failure (slot just taken / error) offer a one-tap way to start over,
+    # not just a dead-end main-menu button.
+    rows = []
+    if not booking_ok:
+        rows.append([InlineKeyboardButton(text=t("book_again", lang), callback_data="book_start")])
+    rows.append([InlineKeyboardButton(text=t("main_menu", lang), callback_data="main_menu")])
     await callback.message.edit_text(
-        result_text,
-        reply_markup=InlineKeyboardMarkup(inline_keyboard=[
-            [InlineKeyboardButton(text=t("main_menu", lang), callback_data="main_menu")]
-        ]),
+        result_text, reply_markup=InlineKeyboardMarkup(inline_keyboard=rows),
     )

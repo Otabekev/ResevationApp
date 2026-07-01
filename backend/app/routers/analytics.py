@@ -10,6 +10,7 @@ from app.models.booking import Booking
 from app.models.business import Business
 from app.models.service import Service
 from app.models.staff import Staff
+from app.timeutils import now_local
 from app.models.user import User
 
 router = APIRouter(prefix="/businesses/{business_id}/analytics", tags=["analytics"])
@@ -26,7 +27,9 @@ async def get_analytics(
     if not business or (business.owner_id != user.id and user.role != "super_admin"):
         raise HTTPException(status_code=403)
 
-    since = date.today() - timedelta(days=days)
+    # Local (Asia/Tashkent) "today" — date.today() is server-local (UTC on
+    # Railway) and would be a day off for ~5h every night for UZ users.
+    since = now_local().date() - timedelta(days=days)
 
     # Total bookings in period
     total = await db.scalar(
@@ -71,7 +74,7 @@ async def get_analytics(
         .where(
             and_(
                 Booking.business_id == business_id,
-                Booking.booking_date >= date.today() - timedelta(days=7),
+                Booking.booking_date >= now_local().date() - timedelta(days=7),
             )
         )
         .group_by(Booking.booking_date)

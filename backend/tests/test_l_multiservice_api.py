@@ -207,6 +207,42 @@ async def test_l7_bookings_list_shows_all_services(client, db):
     assert name.startswith("Soch olish")  # primary first
 
 
+async def test_l10_booking_freezes_total_price(client, db):
+    """total_price_at_booking is frozen at insert — a later service price change
+    must not rewrite what a past booking cost."""
+    from app.models.booking import Booking
+
+    owner, biz, (svc1, svc2), staff = await _multi_biz(db, allow_multi=True, telegram_id=710)
+    svc1.price = 50000
+    svc2.price = 30000
+    await db.commit()
+    soon = (date.today() + timedelta(days=3)).isoformat()
+
+    avail = await client.get(
+        "/api/v1/availability",
+        params={"business_id": biz.id, "service_id": svc1.id, "date": soon,
+                "service_ids": [svc1.id, svc2.id]},
+    )
+    start = avail.json()[0]["start_time"]
+    r = await client.post(
+        "/api/v1/bookings/public",
+        headers=BOT_HEADERS,
+        json={"business_id": biz.id, "service_id": svc1.id, "service_ids": [svc1.id, svc2.id],
+              "booking_date": soon, "start_time": f"{start}:00",
+              "customer_name": "Multi", "customer_phone": "+998901112266", "telegram_id": 9910},
+    )
+    assert r.status_code == 201, r.text
+
+    bk = await db.get(Booking, r.json()["id"])
+    assert float(bk.total_price_at_booking) == 80000.0
+
+    # Raise the service price afterward — the frozen snapshot must not move.
+    svc1.price = 999999
+    await db.commit()
+    await db.refresh(bk)
+    assert float(bk.total_price_at_booking) == 80000.0
+
+
 async def test_l8_delete_inactive_staff_removes_them(client, db):
     """Delete requires staff to be inactive first (stop → delete two-step).
     Cascades staff_services/working_hours; historical bookings are detached."""

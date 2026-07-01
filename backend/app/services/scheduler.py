@@ -31,6 +31,25 @@ logger = logging.getLogger("rezerv.scheduler")
 
 scheduler = AsyncIOScheduler(timezone="Asia/Tashkent")
 
+# Heartbeat: updated after every reminder sweep (success OR handled error). If it
+# stops advancing, the scheduler has silently died — reminders would stop with no
+# other symptom, so /health watches it.
+last_reminder_run: datetime | None = None
+
+
+def scheduler_health() -> dict:
+    """Reminder-scheduler liveness for /health. Stale = the 15-min sweep hasn't
+    run in 20 min (dead scheduler / stuck loop). last_reminder_run is seeded at
+    start so a freshly-started scheduler isn't flagged before its first sweep."""
+    now = datetime.now(timezone.utc)
+    running = scheduler.running
+    stale = last_reminder_run is None or (now - last_reminder_run) > timedelta(minutes=20)
+    return {
+        "running": running,
+        "last_reminder_run": last_reminder_run.isoformat() if last_reminder_run else None,
+        "healthy": bool(running and not stale),
+    }
+
 
 async def _send_reminders() -> None:
     async with AsyncSessionLocal() as db:
@@ -44,10 +63,15 @@ async def _send_reminders() -> None:
             window_start = now + timedelta(hours=hours_until - 0.25)
             window_end = now + timedelta(hours=hours_until + 0.25)
 
+            # Pending bookings (a service with requires_confirmation=True is
+            # created pending, booking_engine.py) hold their slot exactly like
+            # confirmed ones — every other live-booking filter in the codebase
+            # treats pending+confirmed together. Reminding them is what stops the
+            # no-shows the reviewer flagged.
             stmt = select(Booking).where(
                 and_(
                     flag_col == False,  # noqa: E712
-                    Booking.status == "confirmed",
+                    Booking.status.in_(["pending", "confirmed"]),
                     Booking.booking_date >= today,
                     Booking.booking_date <= today + timedelta(days=2),
                 )
@@ -100,7 +124,20 @@ async def _send_reminders() -> None:
                         hours_until=hours_until,
                     )
 
-                    success = await send_telegram_message(customer.telegram_id, text)
+                    # A one-tap Cancel button on the reminder — a customer who
+                    # can't make it frees the slot instead of no-showing. Routes
+                    # to the bot's existing cancel_ask handler.
+                    cancel_label = {
+                        "uz": "❌ Bekor qilish", "ru": "❌ Отменить", "en": "❌ Cancel",
+                    }.get(lang, "❌ Bekor qilish")
+                    reminder_kb = {
+                        "inline_keyboard": [
+                            [{"text": cancel_label, "callback_data": f"cancel_ask_{booking.id}"}]
+                        ]
+                    }
+                    success = await send_telegram_message(
+                        customer.telegram_id, text, reply_markup=reminder_kb
+                    )
 
                     # On the 1-hour reminder (read right before heading out), also
                     # drop the business map pin for one-tap directions.
@@ -122,7 +159,14 @@ async def _send_reminders() -> None:
                             status="sent" if success else "failed",
                         )
                     )
-                    setattr(booking, flag_name, True)
+                    # Only mark the reminder as sent when it actually went out. A
+                    # transient Telegram failure leaves the flag False so the next
+                    # 15-min sweep retries (bounded — the booking drops out once it
+                    # leaves the ±15-min window). Permanent skips above (no
+                    # telegram_id / missing business) still set the flag, since
+                    # retrying those never helps.
+                    if success:
+                        setattr(booking, flag_name, True)
                 except Exception:
                     logger.exception("Reminder failed for booking %s", booking.id)
 
@@ -130,10 +174,13 @@ async def _send_reminders() -> None:
 
 
 async def _send_reminders_safe() -> None:
+    global last_reminder_run
     try:
         await _send_reminders()
     except Exception:
         logger.exception("Reminder sweep failed")
+    finally:
+        last_reminder_run = datetime.now(timezone.utc)
 
 
 async def _send_due_broadcasts_safe() -> None:
@@ -145,6 +192,8 @@ async def _send_due_broadcasts_safe() -> None:
 
 
 def start_scheduler() -> None:
+    global last_reminder_run
+    last_reminder_run = datetime.now(timezone.utc)  # grace before the first sweep
     scheduler.add_job(
         _send_reminders_safe,
         "interval",

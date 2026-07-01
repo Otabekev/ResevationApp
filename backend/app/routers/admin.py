@@ -19,6 +19,7 @@ from app.models.service import Service
 from app.models.staff import Staff
 from app.models.user import User
 from app.services import broadcast_service
+from app.timeutils import now_local
 
 router = APIRouter(prefix="/admin", tags=["admin"])
 
@@ -82,15 +83,13 @@ async def get_platform_stats(
     _: User = Depends(get_current_super_admin),
     db: AsyncSession = Depends(get_db),
 ):
-    from datetime import date
-
     total_biz = await db.scalar(select(func.count(Business.id)))
     active_biz = await db.scalar(select(func.count(Business.id)).where(Business.status == "active"))
     trial_biz = await db.scalar(select(func.count(Business.id)).where(Business.status == "trial"))
     total_bookings = await db.scalar(select(func.count(Booking.id)))
     total_customers = await db.scalar(select(func.count(Customer.id)))
     today_bookings = await db.scalar(
-        select(func.count(Booking.id)).where(Booking.booking_date == date.today())
+        select(func.count(Booking.id)).where(Booking.booking_date == now_local().date())
     )
 
     return PlatformStats(
@@ -239,16 +238,19 @@ async def get_business_detail(
     bookings_total = await db.scalar(
         select(func.count(Booking.id)).where(Booking.business_id == business_id)
     ) or 0
+    # Local (Asia/Tashkent) "today"/"this month" — date.today() is server-local
+    # (UTC on Railway), which is a day off for ~5h every night for UZ users.
+    local_today = now_local().date()
     bookings_today = await db.scalar(
         select(func.count(Booking.id)).where(
             Booking.business_id == business_id,
-            Booking.booking_date == date.today(),
+            Booking.booking_date == local_today,
         )
     ) or 0
     bookings_month = await db.scalar(
         select(func.count(Booking.id)).where(
             Booking.business_id == business_id,
-            Booking.booking_date >= date.today().replace(day=1),
+            Booking.booking_date >= local_today.replace(day=1),
         )
     ) or 0
     bookings_confirmed = await db.scalar(

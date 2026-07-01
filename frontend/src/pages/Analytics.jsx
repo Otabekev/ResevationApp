@@ -101,6 +101,16 @@ export default function Analytics() {
         </div>
       </div>
 
+      {data.total_bookings === 0 && (
+        <div className="card" style={{ marginBottom: "var(--space-4)" }}>
+          <EmptyState
+            icon={<IconChart size={26} />}
+            title={t("analytics_empty_title")}
+            subtitle={t("analytics_empty_sub")}
+          />
+        </div>
+      )}
+
       <div className="stats-grid stagger">
         <div className="stat-card">
           <div className="stat-head"><span className="stat-icon"><IconCalendar size={18} /></span></div>
@@ -195,11 +205,6 @@ export default function Analytics() {
           </div>
         )}
 
-        {data.total_bookings === 0 && (
-          <div className="card">
-            <EmptyState icon={<IconChart size={24} />} title={t("no_data")} subtitle={t("analytics_empty_sub")} />
-          </div>
-        )}
       </div>
     </div>
   );

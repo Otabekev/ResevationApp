@@ -30,6 +30,7 @@
   "booking_confirmed": "✅ Booking created! Confirmation sent.",
   "booking_failed": "❌ Booking failed. The slot may have been taken. Please try again.",
   "slot_taken": "❌ That time was just taken. Please pick another slot.",
+  "book_again": "🔄 Try again",
   "no_bookings": "You have no upcoming bookings yet.",
   "upcoming_bookings": "📅 <b>Upcoming bookings:</b>",
   "past_bookings": "📋 <b>Past bookings:</b>",

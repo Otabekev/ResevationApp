@@ -69,6 +69,7 @@ export default function Bookings() {
   const [loading, setLoading] = useState(false);
   const [toast, setToast] = useState(null);
   const [confirmCancelId, setConfirmCancelId] = useState(null);
+  const [cancelReason, setCancelReason] = useState("");
 
   // Manual booking modal
   const [showModal, setShowModal] = useState(false);
@@ -132,9 +133,15 @@ export default function Bookings() {
 
   const handleCancel = async (bookingId) => {
     try {
-      await cancelBooking(bookingId);
+      const res = await cancelBooking(bookingId, cancelReason || null);
       setConfirmCancelId(null);
-      setToast({ message: t("booking_cancelled_toast"), variant: "success" });
+      setCancelReason("");
+      // Reassure the owner the customer actually got the message — but stay
+      // honest for a walk-in with no Telegram (customer_notified === false).
+      setToast({
+        message: res?.customer_notified ? t("booking_cancelled_notified") : t("booking_cancelled_toast"),
+        variant: "success",
+      });
       await load();
     } catch {
       setToast({ message: t("error"), variant: "error" });
@@ -152,6 +159,13 @@ export default function Bookings() {
     e.preventDefault();
     if (!form.start_time) {
       setModalError(t("pick_time_slot"));
+      return;
+    }
+    // Phone must be a real Uzbek number so it's callable later (a tel: link) —
+    // catch "asdf" here for instant feedback; the backend enforces it too.
+    const digits = (form.customer_phone || "").replace(/\D/g, "");
+    if (!(digits.length === 9 || (digits.length === 12 && digits.startsWith("998")))) {
+      setModalError(t("invalid_phone"));
       return;
     }
     setSaving(true);
@@ -273,11 +287,24 @@ export default function Bookings() {
                       <IconBan size={15} /> {t("no_show")}
                     </button>
                     {confirmCancelId === b.id ? (
-                      <span className="row" style={{ gap: 6 }}>
+                      <span className="row" style={{ gap: 6, flexWrap: "wrap" }}>
+                        <select
+                          className="input"
+                          value={cancelReason}
+                          onChange={(e) => setCancelReason(e.target.value)}
+                          style={{ minHeight: 32, padding: "4px 8px", fontSize: "var(--text-sm)", width: "auto" }}
+                          aria-label={t("cancel_reason_prompt")}
+                        >
+                          <option value="">{t("cancel_reason_prompt")}</option>
+                          <option value={t("cancel_reason_staff")}>{t("cancel_reason_staff")}</option>
+                          <option value={t("cancel_reason_closed")}>{t("cancel_reason_closed")}</option>
+                          <option value={t("cancel_reason_customer")}>{t("cancel_reason_customer")}</option>
+                          <option value={t("cancel_reason_other")}>{t("cancel_reason_other")}</option>
+                        </select>
                         <button className="btn btn-danger btn-sm" onClick={() => handleCancel(b.id)}>
                           {t("yes_cancel")}
                         </button>
-                        <button className="btn btn-ghost btn-sm" onClick={() => setConfirmCancelId(null)}>
+                        <button className="btn btn-ghost btn-sm" onClick={() => { setConfirmCancelId(null); setCancelReason(""); }}>
                           {t("keep")}
                         </button>
                       </span>
@@ -285,7 +312,7 @@ export default function Bookings() {
                       <button
                         className="btn btn-danger-soft btn-sm"
                         title={t("cancel")}
-                        onClick={() => setConfirmCancelId(b.id)}
+                        onClick={() => { setConfirmCancelId(b.id); setCancelReason(""); }}
                       >
                         <IconX size={15} />
                       </button>

@@ -160,7 +160,7 @@ Legend: ✅ done & test-proven · 🟡 done, needs Postgres to prove · ⬜ pend
 | Finding | Fix | Files | Proof |
 |---|---|---|---|
 | **K1** migrations git-ignored | Fixed (see C1). | `.gitignore` | — |
-| **K2** base compose ran `--reload`, no migration | Removed override (Dockerfile CMD migrates); `--reload` + bind-mount moved to dev overlay. | `docker-compose.yml`, `docker-compose.dev.yml` | inspection |
+| **K2** base compose ran `--reload`, no migration | Removed override; `--reload` + bind-mount moved to dev overlay. Migrations run in Railway `preDeployCommand` (prod); for a raw docker-compose/VPS deploy, run `alembic upgrade head` explicitly first (RUNBOOK.md) — the Dockerfile CMD deliberately does NOT migrate, to keep the healthcheck window from racing the migration. | `docker-compose.yml`, `docker-compose.dev.yml`, `railway.toml` | inspection |
 | **K3** `npm ci` build break (no lockfile) | Generated `package-lock.json`; build verified. | `frontend/package-lock.json` | `npm run build` ✓ |
 | **K4** no security headers | Added to nginx + Vercel (X-Content-Type-Options, X-Frame-Options, Referrer-Policy, HSTS, Permissions-Policy). | `nginx.conf`, `vercel.json` | inspection |
 | **K7** no runbook | `RUNBOOK.md` (deploy / rollback / rotate / restore / incidents). | `RUNBOOK.md` | — |

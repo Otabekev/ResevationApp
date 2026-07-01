@@ -77,6 +77,19 @@ async def send_telegram_location(chat_id: int, latitude: float, longitude: float
         return False
 
 
+_CONFIRM_LABELS = {
+    "uz": {"title": "✅ <b>Bron tasdiqlandi!</b>", "svc": "Xizmat", "staff": "Usta",
+           "addr": "Manzil", "phone": "Tel", "price": "Narx", "date": "Sana",
+           "time": "Vaqt", "unit": "so'm", "foot": "Kech qolmang! ⏰"},
+    "ru": {"title": "✅ <b>Бронь подтверждена!</b>", "svc": "Услуга", "staff": "Мастер",
+           "addr": "Адрес", "phone": "Тел", "price": "Цена", "date": "Дата",
+           "time": "Время", "unit": "сум", "foot": "Не опаздывайте! ⏰"},
+    "en": {"title": "✅ <b>Booking confirmed!</b>", "svc": "Service", "staff": "Staff",
+           "addr": "Address", "phone": "Phone", "price": "Price", "date": "Date",
+           "time": "Time", "unit": "UZS", "foot": "Don't be late! ⏰"},
+}
+
+
 def booking_confirmed_message(
     lang: str,
     business_name: str,
@@ -84,38 +97,34 @@ def booking_confirmed_message(
     staff_name: str,
     date_str: str,
     time_str: str,
+    address: str | None = None,
+    phone: str | None = None,
+    price: float | None = None,
 ) -> str:
+    """Customer confirmation. Includes address, phone and price when available so
+    the customer knows where to go, how to reach the business, and what it costs
+    (a native map pin is sent separately when the business has coordinates)."""
+    L = _CONFIRM_LABELS.get(lang, _CONFIRM_LABELS["uz"])
     business_name, service_name, staff_name = _esc(business_name), _esc(service_name), _esc(staff_name)
-    templates = {
-        "uz": (
-            f"✅ <b>Bron tasdiqlandi!</b>\n\n"
-            f"🏪 {business_name}\n"
-            f"💈 Xizmat: {service_name}\n"
-            f"👤 Usta: {staff_name}\n"
-            f"📅 Sana: {date_str}\n"
-            f"🕐 Vaqt: {time_str}\n\n"
-            f"Kech qolmang! ⏰"
-        ),
-        "ru": (
-            f"✅ <b>Бронь подтверждена!</b>\n\n"
-            f"🏪 {business_name}\n"
-            f"💈 Услуга: {service_name}\n"
-            f"👤 Мастер: {staff_name}\n"
-            f"📅 Дата: {date_str}\n"
-            f"🕐 Время: {time_str}\n\n"
-            f"Не опаздывайте! ⏰"
-        ),
-        "en": (
-            f"✅ <b>Booking confirmed!</b>\n\n"
-            f"🏪 {business_name}\n"
-            f"💈 Service: {service_name}\n"
-            f"👤 Staff: {staff_name}\n"
-            f"📅 Date: {date_str}\n"
-            f"🕐 Time: {time_str}\n\n"
-            f"Don't be late! ⏰"
-        ),
-    }
-    return templates.get(lang, templates["uz"])
+
+    lines = [
+        L["title"], "",
+        f"🏪 {business_name}",
+        f"💈 {L['svc']}: {service_name}",
+        f"👤 {L['staff']}: {staff_name}",
+    ]
+    if address:
+        lines.append(f"📍 {L['addr']}: {_esc(address)}")
+    if phone:
+        lines.append(f"📞 {L['phone']}: {_esc(phone)}")
+    if price:
+        lines.append(f"💰 {L['price']}: {int(price):,} {L['unit']}")
+    lines += [
+        f"📅 {L['date']}: {date_str}",
+        f"🕐 {L['time']}: {time_str}",
+        "", L["foot"],
+    ]
+    return "\n".join(lines)
 
 
 def booking_reminder_message(
@@ -170,6 +179,45 @@ def review_prompt_message(lang: str, business_name: str, service_name: str, book
         ),
     }
     return templates.get(lang, templates["uz"])
+
+
+def customer_cancelled_alert_message(
+    lang: str,
+    customer_name: str,
+    date_str: str,
+    time_str: str,
+    late_policy_hours: int | None = None,
+) -> str:
+    """Owner alert when a CUSTOMER cancels. If late_policy_hours is set, the
+    cancellation landed inside the business's cancellation window — flag it so the
+    owner knows the slot freed up late and may not get rebooked in time."""
+    customer_name = _esc(customer_name)
+    templates = {
+        "uz": (
+            f"❌ <b>Mijoz bronni bekor qildi</b>\n"
+            f"👤 {customer_name}\n"
+            f"📅 {date_str}  🕐 {time_str}"
+        ),
+        "ru": (
+            f"❌ <b>Клиент отменил запись</b>\n"
+            f"👤 {customer_name}\n"
+            f"📅 {date_str}  🕐 {time_str}"
+        ),
+        "en": (
+            f"❌ <b>Customer cancelled the booking</b>\n"
+            f"👤 {customer_name}\n"
+            f"📅 {date_str}  🕐 {time_str}"
+        ),
+    }
+    msg = templates.get(lang, templates["uz"])
+    if late_policy_hours is not None:
+        late_note = {
+            "uz": f"\n⚠️ Kech bekor qilindi (siyosatingiz: {late_policy_hours} soat).",
+            "ru": f"\n⚠️ Поздняя отмена (ваше правило: {late_policy_hours} ч).",
+            "en": f"\n⚠️ Late cancellation (your policy: {late_policy_hours}h).",
+        }.get(lang, f"\n⚠️ Kech bekor qilindi (siyosatingiz: {late_policy_hours} soat).")
+        msg += late_note
+    return msg
 
 
 def new_booking_alert_message(

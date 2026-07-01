@@ -30,6 +30,7 @@
   "booking_confirmed": "✅ Bron qilindi! Tasdiqlash xabari yuborildi.",
   "booking_failed": "❌ Bron qilishda xatolik. Vaqt band bo'lishi mumkin. Qayta urinib ko'ring.",
   "slot_taken": "❌ Bu vaqt hozirgina band qilindi. Boshqa vaqt tanlang.",
+  "book_again": "🔄 Qayta urinish",
   "no_bookings": "Hozircha kelgusi bronlaringiz yo'q.",
   "upcoming_bookings": "📅 <b>Kelgusi bronlar:</b>",
   "past_bookings": "📋 <b>O'tgan bronlar:</b>",

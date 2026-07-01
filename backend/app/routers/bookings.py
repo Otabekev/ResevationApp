@@ -1,3 +1,4 @@
+import re
 from datetime import date, time
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Request, status
@@ -14,9 +15,11 @@ from app.models.service import Service
 from app.models.staff import Staff
 from app.models.user import User
 from app.services.booking_engine import create_booking
+from app.timeutils import now_local, to_local
 from app.services.notification_service import (
     booking_confirmed_message,
     booking_cancelled_message,
+    customer_cancelled_alert_message,
     new_booking_alert_message,
     review_prompt_message,
     send_telegram_location,
@@ -27,6 +30,23 @@ router = APIRouter(tags=["bookings"])
 
 
 # ── Schemas ──────────────────────────────────────────────────────────────────
+
+_UZ_PHONE_RE = re.compile(r"^\+998\d{9}$")
+
+
+def _normalize_uz_phone(raw: str) -> str | None:
+    """Normalize an Uzbek number to canonical +998XXXXXXXXX, or None if it can't
+    be one. Accepts '+998901234567', '998901234567', '901234567', with spaces or
+    dashes — the same rule the bot uses — so a manual booking can't store junk
+    like 'asdf' the owner can never call back."""
+    digits = re.sub(r"[^\d]", "", raw or "")
+    if len(digits) == 9:
+        digits = "998" + digits
+    if len(digits) == 12 and digits.startswith("998"):
+        candidate = "+" + digits
+        return candidate if _UZ_PHONE_RE.match(candidate) else None
+    return None
+
 
 def _normalize_service_ids(self):
     """Keep service_id and service_ids consistent. With no list, default it to
@@ -72,6 +92,14 @@ class BookingCreateManual(BaseModel):
     customer_name: str = Field(..., min_length=1, max_length=255)
     customer_phone: str = Field(..., min_length=3, max_length=20)
     notes: str | None = Field(None, max_length=1000)
+
+    @field_validator("customer_phone")
+    @classmethod
+    def _valid_phone(cls, v: str) -> str:
+        normalized = _normalize_uz_phone(v)
+        if normalized is None:
+            raise ValueError("Enter a valid phone, e.g. +998 90 123 45 67")
+        return normalized
 
     _fill_service_ids = model_validator(mode="after")(_normalize_service_ids)
 
@@ -244,6 +272,7 @@ async def create_public_booking(
     lang = customer.language
     names = _svc_names_all(ordered_services)
     staff_name = staff.name if staff else "—"
+    total_price = sum(float(s.price) for s in ordered_services if s.price is not None)
 
     await send_telegram_message(
         customer.telegram_id,
@@ -254,6 +283,9 @@ async def create_public_booking(
             staff_name=staff_name,
             date_str=str(booking.booking_date),
             time_str=booking.start_time.strftime("%H:%M"),
+            address=business.address,
+            phone=business.phone,
+            price=total_price or None,
         ),
     )
 
@@ -485,7 +517,7 @@ async def update_booking_status(
     return booking
 
 
-@router.patch("/bookings/{booking_id}/cancel", response_model=BookingOut)
+@router.patch("/bookings/{booking_id}/cancel", response_model=None)
 async def cancel_booking(
     booking_id: int,
     body: CancelRequest,
@@ -521,9 +553,12 @@ async def cancel_booking(
     await db.commit()
     await db.refresh(booking)
 
-    # Notify the other party
+    # Notify the other party. customer_notified lets the owner's UI reassure them
+    # the customer actually got the message — and stay honest for a walk-in who
+    # has no Telegram (never notified).
+    customer_notified = False
     if booking.status == "cancelled_by_business" and customer and customer.telegram_id:
-        await send_telegram_message(
+        customer_notified = await send_telegram_message(
             customer.telegram_id,
             booking_cancelled_message(
                 lang=customer.language,
@@ -539,17 +574,27 @@ async def cancel_booking(
                 await db.execute(select(User).where(User.id == business.owner_id))
             ).scalar_one_or_none()
         if owner and owner.telegram_id:
+            # Flag a LATE cancel — one that lands inside the business's
+            # cancellation window. We allow it (freeing the slot beats a silent
+            # no-show), but the owner is told so they can try to rebook the slot.
+            apt = to_local(booking.booking_date, booking.start_time)
+            hours_until = (apt - now_local()).total_seconds() / 3600
+            policy = business.cancellation_policy_hours if business else 0
+            is_late = policy and hours_until < policy
             await send_telegram_message(
                 owner.telegram_id,
-                booking_cancelled_message(
+                customer_cancelled_alert_message(
                     lang=owner.language,
-                    business_name=booking.customer_name,
+                    customer_name=booking.customer_name,
                     date_str=str(booking.booking_date),
                     time_str=booking.start_time.strftime("%H:%M"),
+                    late_policy_hours=policy if is_late else None,
                 ),
             )
 
-    return booking
+    out = BookingOut.model_validate(booking).model_dump(mode="json")
+    out["customer_notified"] = bool(customer_notified)
+    return out
 
 
 # ── Customer: own bookings ────────────────────────────────────────────────────
@@ -567,7 +612,6 @@ async def get_customer_bookings(
     if user.telegram_id != telegram_id and user.role != "super_admin":
         raise HTTPException(status_code=403, detail="Forbidden")
 
-    from datetime import date as date_type
     customer = (
         await db.execute(select(Customer).where(Customer.telegram_id == telegram_id))
     ).scalar_one_or_none()
@@ -576,7 +620,9 @@ async def get_customer_bookings(
 
     filters = [Booking.customer_id == customer.id]
     if upcoming_only:
-        filters.append(Booking.booking_date >= date_type.today())
+        # Local (Asia/Tashkent) today, not server-local (UTC) — otherwise for ~5h
+        # every night a customer's "upcoming" list leaks yesterday's appointment.
+        filters.append(Booking.booking_date >= now_local().date())
         filters.append(Booking.status.in_(["pending", "confirmed"]))
 
     order = (

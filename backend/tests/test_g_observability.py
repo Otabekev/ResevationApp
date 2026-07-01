@@ -29,7 +29,26 @@ async def test_response_has_request_id_header(client):
     assert resp.headers.get("X-Request-ID")
 
 
-async def test_health_reports_db_ok(client):
+async def test_health_reports_db_ok(client, monkeypatch):
+    # Tests don't start the scheduler, so simulate a healthy running one.
+    monkeypatch.setattr(
+        "app.services.scheduler.scheduler_health",
+        lambda: {"running": True, "last_reminder_run": "2026-07-01T00:00:00+00:00", "healthy": True},
+    )
     resp = await client.get("/health")
     assert resp.status_code == 200
     assert resp.json()["db"] is True
+    assert resp.json()["scheduler"]["healthy"] is True
+
+
+async def test_health_503_when_scheduler_dead(client, monkeypatch):
+    """DB fine but a silently-dead scheduler → 503, so an uptime pinger catches it
+    (dead scheduler = no reminders = otherwise invisible failure)."""
+    monkeypatch.setattr(
+        "app.services.scheduler.scheduler_health",
+        lambda: {"running": False, "last_reminder_run": None, "healthy": False},
+    )
+    resp = await client.get("/health")
+    assert resp.status_code == 503
+    assert resp.json()["db"] is True
+    assert resp.json()["scheduler"]["healthy"] is False
