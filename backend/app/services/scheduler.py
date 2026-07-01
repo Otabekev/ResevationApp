@@ -44,10 +44,15 @@ async def _send_reminders() -> None:
             window_start = now + timedelta(hours=hours_until - 0.25)
             window_end = now + timedelta(hours=hours_until + 0.25)
 
+            # Pending bookings (a service with requires_confirmation=True is
+            # created pending, booking_engine.py) hold their slot exactly like
+            # confirmed ones — every other live-booking filter in the codebase
+            # treats pending+confirmed together. Reminding them is what stops the
+            # no-shows the reviewer flagged.
             stmt = select(Booking).where(
                 and_(
                     flag_col == False,  # noqa: E712
-                    Booking.status == "confirmed",
+                    Booking.status.in_(["pending", "confirmed"]),
                     Booking.booking_date >= today,
                     Booking.booking_date <= today + timedelta(days=2),
                 )
@@ -122,7 +127,14 @@ async def _send_reminders() -> None:
                             status="sent" if success else "failed",
                         )
                     )
-                    setattr(booking, flag_name, True)
+                    # Only mark the reminder as sent when it actually went out. A
+                    # transient Telegram failure leaves the flag False so the next
+                    # 15-min sweep retries (bounded — the booking drops out once it
+                    # leaves the ±15-min window). Permanent skips above (no
+                    # telegram_id / missing business) still set the flag, since
+                    # retrying those never helps.
+                    if success:
+                        setattr(booking, flag_name, True)
                 except Exception:
                     logger.exception("Reminder failed for booking %s", booking.id)
 
