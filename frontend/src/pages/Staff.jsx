@@ -1,6 +1,6 @@
 import { useEffect, useState } from "react";
 import {
-  getStaff, createStaff, updateStaff, getServices, setStaffServices, createStaffInvite,
+  getStaff, createStaff, updateStaff, deleteStaff, getServices, setStaffServices, createStaffInvite,
   getStaffWorkingHours, setStaffWorkingHours, clearStaffWorkingHours, addSelfProvider,
 } from "../api/client";
 import useStore from "../store/useStore";
@@ -11,7 +11,7 @@ import Modal from "../components/Modal";
 import Toast from "../components/Toast";
 import {
   IconPlus, IconUsers, IconLink, IconCopy, IconEdit, IconClock,
-  IconTelegram, IconCheck, IconRefresh,
+  IconTelegram, IconCheck, IconRefresh, IconTrash,
 } from "../components/icons";
 
 const EMPTY_FORM = { name: "", phone: "", bio: "", role: "staff", can_set_own_hours: false, is_active: true };
@@ -114,6 +114,19 @@ export default function Staff() {
     } catch {
       setStaffList((prev) => prev.map((s) => (s.id === staffId ? { ...s, service_ids: currentIds } : s)));
       setToast({ message: t("error"), variant: "error" });
+    }
+  };
+
+  const handleDelete = async (staff) => {
+    // Two-step by design: the card only shows Delete once the staff is stopped,
+    // and the confirm prompts by name so a mis-tap can't quietly wipe someone.
+    if (!window.confirm(t("staff_delete_confirm", { name: staff.name }))) return;
+    try {
+      await deleteStaff(activeBusiness.id, staff.id);
+      await load();
+      setToast({ message: t("staff_deleted"), variant: "success" });
+    } catch (e) {
+      setToast({ message: e.response?.data?.detail || t("error"), variant: "error" });
     }
   };
 
@@ -252,6 +265,20 @@ export default function Staff() {
                   <button className="btn btn-secondary btn-sm btn-icon" title={t("edit")} aria-label={t("edit")} onClick={() => openEdit(s)}>
                     <IconEdit size={16} />
                   </button>
+                  {/* Delete only appears once the staff is stopped — deactivate is
+                      the reversible cleanup, delete is the final one. Owners can't
+                      delete themselves as a provider. */}
+                  {!s.is_active && !s.is_owner && (
+                    <button
+                      className="btn btn-sm btn-icon"
+                      title={t("delete")}
+                      aria-label={t("delete")}
+                      onClick={() => handleDelete(s)}
+                      style={{ color: "var(--danger)", borderColor: "var(--danger)" }}
+                    >
+                      <IconTrash size={16} />
+                    </button>
+                  )}
                 </div>
               </div>
 

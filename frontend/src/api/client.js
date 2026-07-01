@@ -151,6 +151,8 @@ export const addSelfProvider = (bizId, data = {}) =>
   api.post(`/businesses/${bizId}/staff/me`, data).then((r) => r.data);
 export const updateStaff = (bizId, staffId, data) =>
   api.patch(`/businesses/${bizId}/staff/${staffId}`, data, { retryable: true }).then((r) => r.data);
+export const deleteStaff = (bizId, staffId) =>
+  api.delete(`/businesses/${bizId}/staff/${staffId}`).then((r) => r.data);
 export const setStaffServices = (bizId, staffId, serviceIds) =>
   api.put(`/businesses/${bizId}/staff/${staffId}/services`, serviceIds, { retryable: true }).then((r) => r.data);
 export const createStaffInvite = (bizId, staffId) =>
