@@ -128,7 +128,7 @@ Double-booking prevention · emoji/`&`/`<` escaping (bot + backend) · phone nor
 ## Progress tracker
 
 ### Deploy A
-- [x] A1 — investor map secret: backend now rate-limits `/admin/growth` + accepts `X-Growth-Secret` header; QN_Investor site sends header not query. **OPS still needed (owner):** rotate `GROWTH_SECRET` in Railway + password-protect the investor host.
+- [x] A1 — investor map secret (backend only): `/admin/growth` is rate-limited + accepts an `X-Growth-Secret` header (legacy `?secret=` still works). **QN_Investor project left UNTOUCHED per owner** (the earlier growth-source.js edit was reverted). **OPS — owner's court (see memory `investor-map-secret-ops`):** (1) rotate `GROWTH_SECRET` in Railway, (2) password-protect the investor host, (3) redeploy the QN_Investor site.
 - [x] A2 — trial expiry job (`_expire_trials`, every 6h) + `POST /admin/businesses/{id}/record-payment` + approve-to-trial restarts the 14-day window
 - [x] A3 — business-status gate in availability + public + manual booking (suspended/blocked rejected; pending stays bookable for owner testing)
 - [x] A4 — booking status state-machine (terminal locked, same-status no-op, forward transitions only)
