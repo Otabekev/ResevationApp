@@ -133,15 +133,15 @@ Double-booking prevention · emoji/`&`/`<` escaping (bot + backend) · phone nor
 - [x] A3 — business-status gate in availability + public + manual booking (suspended/blocked rejected; pending stays bookable for owner testing)
 - [x] A4 — booking status state-machine (terminal locked, same-status no-op, forward transitions only)
 - [x] A — tests green (13 new, full suite 125 passed / 2 skipped)
-- [ ] A — merged to main + deployed  ← **awaiting owner go-ahead (see trial-expiry warning + A1 ops steps)**
+- [x] A — merged to main + **deployed 2026-07-03** (merge `4f65e4f`). Verified live: `/health` healthy, `/docs`+`/redoc`+`/openapi.json` → 404, `record-payment` route → 401 (live), growth header path → 403. **Owner ops still pending:** rotate `GROWTH_SECRET` + password-protect investor host; trial-expiry job runs within 6h.
 
 ### Deploy B
 - [x] B5 — bot date picker now computes "today" in Asia/Tashkent (fixed UTC+5, no tzdata dependency); no more dead "Today" button / shifted labels overnight
 - [x] B6 — staff-invite hardening + **identity binding (fully closed)**: can't invite or join an already-linked slot (409) or the owner slot (400); one live invite at a time; 48h expiry; tz-safe expiry check. **The forwarding hole is now closed:** on tapping the link the bot has the joiner share their Telegram phone via a one-tap button, and the backend verifies it against `staff.phone` (mismatch → 403; owner left it blank → captures the verified number onto the record). A forwarded link can no longer be redeemed by the wrong person.
 - [x] B7 — reminder sweep claims each row atomically before sending + commits per-booking; a repeat/overlapping sweep sends nothing (no duplicate reminders), and a mid-sweep crash can't roll back sent flags
 - [x] B8 — advisory lock (`pg_advisory_xact_lock`) serializes same-staff+date inserts so buffer-only overlaps can't both commit (Postgres-only; no-op on SQLite)
-- [x] B — tests green (7 new + tz-fix, full suite 132 passed / 2 skipped)
-- [ ] B — merged to main + deployed  ← **awaiting owner go-ahead**
+- [x] B — tests green (7 new + tz-fix, full suite 136 passed / 2 skipped)
+- [x] B — merged to main + **deployed 2026-07-03** (merge `4f65e4f`). Bot + frontend redeployed from the same push.
 
 ### Deploy C
 - [ ] C1–C10 scale hardening
