@@ -87,15 +87,32 @@ async def _send_reminders() -> None:
                     if not (window_start <= apt_datetime <= window_end):
                         continue
 
+                    # CLAIM this reminder before doing any work: flip the flag
+                    # False→True in one atomic statement and commit it. If another
+                    # sweep — or another backend instance during a deploy overlap —
+                    # already claimed it, rowcount is 0 and we skip. This is what
+                    # stops a customer getting the same reminder twice; committing
+                    # the claim per-booking also means a crash mid-sweep can't roll
+                    # back reminders that already went out.
+                    claimed = (
+                        await db.execute(
+                            update(Booking)
+                            .where(and_(Booking.id == booking.id, flag_col == False))  # noqa: E712
+                            .values(**{flag_name: True})
+                        )
+                    ).rowcount
+                    await db.commit()
+                    if not claimed:
+                        continue
+
                     customer = (
                         await db.execute(
                             select(Customer).where(Customer.id == booking.customer_id)
                         )
                     ).scalar_one_or_none()
-                    # Walk-in customers have no Telegram — skip but mark sent so
-                    # the row isn't rescanned forever.
+                    # Walk-in customers have no Telegram — nothing to send. The claim
+                    # already flagged the row so it isn't rescanned forever.
                     if not customer or not customer.telegram_id:
-                        setattr(booking, flag_name, True)
                         continue
 
                     business = (
@@ -109,8 +126,7 @@ async def _send_reminders() -> None:
                         )
                     ).scalar_one_or_none()
                     if not business or not service:
-                        setattr(booking, flag_name, True)
-                        continue
+                        continue  # claim already flagged it; retrying never helps
 
                     lang = customer.language
                     svc_name = getattr(service, f"name_{lang}", service.name_uz)
@@ -159,18 +175,19 @@ async def _send_reminders() -> None:
                             status="sent" if success else "failed",
                         )
                     )
-                    # Only mark the reminder as sent when it actually went out. A
-                    # transient Telegram failure leaves the flag False so the next
-                    # 15-min sweep retries (bounded — the booking drops out once it
-                    # leaves the ±15-min window). Permanent skips above (no
-                    # telegram_id / missing business) still set the flag, since
-                    # retrying those never helps.
-                    if success:
-                        setattr(booking, flag_name, True)
+                    # A transient Telegram failure RELEASES the claim (flag back to
+                    # False) so the next 15-min sweep retries — bounded, since the
+                    # booking drops out once it leaves the ±15-min window.
+                    if not success:
+                        await db.execute(
+                            update(Booking)
+                            .where(Booking.id == booking.id)
+                            .values(**{flag_name: False})
+                        )
+                    await db.commit()
                 except Exception:
                     logger.exception("Reminder failed for booking %s", booking.id)
-
-            await db.commit()
+                    await db.rollback()
 
 
 async def _send_reminders_safe() -> None:

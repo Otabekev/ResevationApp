@@ -136,11 +136,12 @@ Double-booking prevention · emoji/`&`/`<` escaping (bot + backend) · phone nor
 - [ ] A — merged to main + deployed  ← **awaiting owner go-ahead (see trial-expiry warning + A1 ops steps)**
 
 ### Deploy B
-- [ ] B5 — bot date picker → Tashkent time
-- [ ] B6 — staff-invite identity binding
-- [ ] B7 — reminder per-row claim
-- [ ] B8 — buffer-overlap advisory lock
-- [ ] B — tests green, merged, deployed
+- [x] B5 — bot date picker now computes "today" in Asia/Tashkent (fixed UTC+5, no tzdata dependency); no more dead "Today" button / shifted labels overnight
+- [x] B6 — staff-invite hardening: can't invite or join an already-linked slot (409) or the owner slot (400); a new invite invalidates the prior one; expiry cut to 48h. (Bonus: made the `expires_at` check timezone-safe — was a latent naive/aware crash.) **Residual (noted):** a link forwarded before the intended staff redeems it can still claim an *unclaimed* slot — fully closing that needs a bot contact-share step (matched to `staff.phone`), deferred so we don't alter the bot join UX without your OK.
+- [x] B7 — reminder sweep claims each row atomically before sending + commits per-booking; a repeat/overlapping sweep sends nothing (no duplicate reminders), and a mid-sweep crash can't roll back sent flags
+- [x] B8 — advisory lock (`pg_advisory_xact_lock`) serializes same-staff+date inserts so buffer-only overlaps can't both commit (Postgres-only; no-op on SQLite)
+- [x] B — tests green (7 new + tz-fix, full suite 132 passed / 2 skipped)
+- [ ] B — merged to main + deployed  ← **awaiting owner go-ahead**
 
 ### Deploy C
 - [ ] C1–C10 scale hardening

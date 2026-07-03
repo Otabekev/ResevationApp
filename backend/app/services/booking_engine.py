@@ -512,6 +512,18 @@ async def create_booking(
         assigned_staff_id = min(counts, key=lambda k: counts[k])
         auto_assigned = True
 
+    # Serialize concurrent inserts for this staff + date so the buffer/overlap
+    # check below is authoritative. The DB EXCLUDE constraint only covers the raw
+    # appointment interval (not the service buffers), and SELECT FOR UPDATE can't
+    # see a row a concurrent transaction is still inserting — so without this, two
+    # bookings that overlap only in their buffer zone could both commit (no
+    # turnaround gap). The advisory lock releases automatically at transaction end.
+    # Postgres only; SQLite (tests) has no advisory locks and runs serially anyway.
+    if db.bind.dialect.name == "postgresql":
+        await db.execute(
+            select(func.pg_advisory_xact_lock(assigned_staff_id, booking_date.toordinal()))
+        )
+
     # Lock existing bookings for this staff + date (prevents race conditions)
     lock_stmt = (
         select(Booking)

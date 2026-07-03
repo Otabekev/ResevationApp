@@ -306,9 +306,23 @@ async def create_invite(
     staff = await db.get(Staff, staff_id)
     if not staff or staff.business_id != business_id:
         raise HTTPException(status_code=404, detail="Staff not found")
+    if staff.is_owner:
+        raise HTTPException(status_code=400, detail="The owner cannot be invited as staff")
+    if staff.user_id is not None:
+        raise HTTPException(status_code=409, detail="This staff member is already linked to an account")
+
+    # One live invite per staff: invalidate any earlier unused invites so a stale
+    # forwarded link can't still be redeemed after a fresh one is issued.
+    await db.execute(
+        update(StaffInvite)
+        .where(and_(StaffInvite.staff_id == staff_id, StaffInvite.is_active == True))  # noqa: E712
+        .values(is_active=False)
+    )
 
     token = secrets.token_urlsafe(32)
-    expires_at = datetime.now(timezone.utc) + timedelta(days=7)
+    # Short window (48h) — an invite is meant to be tapped promptly; a long-lived
+    # link is just a bigger forwarding target.
+    expires_at = datetime.now(timezone.utc) + timedelta(hours=48)
     invite = StaffInvite(
         business_id=business_id,
         staff_id=staff_id,
@@ -349,12 +363,22 @@ async def join_via_invite(
     invite = result.scalar_one_or_none()
     if not invite:
         raise HTTPException(status_code=404, detail="Invite not found or expired")
-    if invite.expires_at < datetime.now(timezone.utc):
+    expires_at = invite.expires_at
+    if expires_at.tzinfo is None:  # some drivers return naive for TIMESTAMPTZ — normalize
+        expires_at = expires_at.replace(tzinfo=timezone.utc)
+    if expires_at < datetime.now(timezone.utc):
         raise HTTPException(status_code=400, detail="Invite expired")
 
     staff = await db.get(Staff, invite.staff_id)
     if not staff:
         raise HTTPException(status_code=404, detail="Staff record not found")
+    if staff.is_owner:
+        raise HTTPException(status_code=400, detail="The owner cannot be invited as staff")
+    # Refuse to hand an already-claimed staff slot to a second person — a forwarded
+    # link must never be able to take over an active staff member's record (and
+    # their customers' contact details).
+    if staff.user_id is not None:
+        raise HTTPException(status_code=409, detail="This staff member is already linked to an account")
 
     # Link the user to this staff record
     staff.user_id = user.id
