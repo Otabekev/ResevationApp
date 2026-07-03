@@ -166,6 +166,10 @@ async def cmd_start(message: Message, state: FSMContext) -> None:
 
 
 async def _handle_join(message: Message, state: FSMContext, token: str) -> None:
+    """A staff invite link was tapped. Don't link the account yet — first have the
+    user share their Telegram phone (a verified number) so the backend can check it
+    matches the phone the owner put on the staff record. That stops a forwarded
+    link from being redeemed by the wrong person."""
     data = await state.get_data()
     lang = data.get("lang", "uz")
     access_token = data.get("access_token")
@@ -174,15 +178,47 @@ async def _handle_join(message: Message, state: FSMContext, token: str) -> None:
         await message.answer(t("join_invalid", lang))
         return
 
+    await state.update_data(join_token=token)
+    kb = ReplyKeyboardMarkup(
+        keyboard=[[KeyboardButton(text=t("share_phone_button", lang), request_contact=True)]],
+        resize_keyboard=True,
+        one_time_keyboard=True,
+    )
+    await message.answer(t("join_share_phone", lang), reply_markup=kb)
+
+
+@router.message(F.contact)
+async def on_contact_shared(message: Message, state: FSMContext) -> None:
+    """The user shared their phone to complete a staff invite. Stray contacts (no
+    pending join) are ignored so this never interferes with other flows."""
+    data = await state.get_data()
+    token = data.get("join_token")
+    if not token:
+        return
+    lang = data.get("lang", "uz")
+    access_token = data.get("access_token")
+    contact = message.contact
+
+    # Only accept the sender's OWN verified number (the request_contact button),
+    # never a forwarded contact card for someone else.
+    if contact.user_id != message.from_user.id:
+        await message.answer(t("join_share_own_phone", lang))
+        return
+
+    await state.update_data(join_token=None)
     try:
-        result = await api_client.join_via_invite(token, access_token)
+        result = await api_client.join_via_invite(token, access_token, phone=contact.phone_number)
         biz = await api_client.get_public_business(result["business_id"])
         await message.answer(
             t("join_success", lang, business=esc(biz.get("name", ""))),
-            reply_markup=main_menu_keyboard(lang),
+            reply_markup=ReplyKeyboardRemove(),
         )
+        await message.answer(t("main_menu", lang), reply_markup=main_menu_keyboard(lang))
+    except ValueError:
+        # Phone didn't match the staff record — the link is for a different number.
+        await message.answer(t("join_phone_mismatch", lang), reply_markup=ReplyKeyboardRemove())
     except Exception:
-        await message.answer(t("join_invalid", lang))
+        await message.answer(t("join_invalid", lang), reply_markup=ReplyKeyboardRemove())
 
 
 async def _handle_setloc_prompt(message: Message, state: FSMContext, nonce: str) -> None:

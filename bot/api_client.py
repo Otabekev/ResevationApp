@@ -188,10 +188,15 @@ async def submit_review(telegram_id: int, booking_id: int, rating: int, comment:
     return resp.json()
 
 
-async def join_via_invite(token: str, access_token: str) -> dict:
+async def join_via_invite(token: str, access_token: str, phone: str | None = None) -> dict:
     resp = await _client.post(
         f"{BACKEND_URL}/staff/join/{token}",
+        json={"phone": phone},
         headers={"Authorization": f"Bearer {access_token}"},
     )
+    # 403 = the shared phone doesn't match the staff record — surface it distinctly
+    # so the bot can tell the user this invite is for someone else's number.
+    if resp.status_code == 403:
+        raise ValueError("phone_mismatch")
     resp.raise_for_status()
     return resp.json()

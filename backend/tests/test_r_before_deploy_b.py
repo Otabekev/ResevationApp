@@ -108,6 +108,67 @@ async def test_b6_join_rejected_for_owner_slot(client, db):
     assert rj.status_code == 400, rj.text
 
 
+async def _invite_token(client, db, biz, staff, owner):
+    r = await client.post(f"/api/v1/businesses/{biz.id}/staff/{staff.id}/invite",
+                          headers=f.auth_header(owner.id))
+    assert r.status_code == 200, r.text
+    return r.json()["token"]
+
+
+async def test_b6_join_succeeds_when_shared_phone_matches(client, db):
+    owner, biz, staff = await _owner_biz_staff(db)
+    staff.phone = "+998901112233"
+    await db.commit()
+    token = await _invite_token(client, db, biz, staff, owner)
+
+    joiner = await f.create_user(db, role="customer", telegram_id=333)
+    # Different formatting, same number — must normalize and match.
+    rj = await client.post(f"/api/v1/staff/join/{token}",
+                           json={"phone": "998 90 111 22 33"},
+                           headers=f.auth_header(joiner.id))
+    assert rj.status_code == 200, rj.text
+    await db.refresh(staff)
+    assert staff.user_id == joiner.id
+
+
+async def test_b6_join_rejected_when_shared_phone_differs(client, db):
+    owner, biz, staff = await _owner_biz_staff(db)
+    staff.phone = "+998901112233"
+    await db.commit()
+    token = await _invite_token(client, db, biz, staff, owner)
+
+    joiner = await f.create_user(db, role="customer", telegram_id=333)
+    rj = await client.post(f"/api/v1/staff/join/{token}",
+                           json={"phone": "+998907776655"},
+                           headers=f.auth_header(joiner.id))
+    assert rj.status_code == 403, rj.text
+
+
+async def test_b6_join_rejected_when_phone_required_but_absent(client, db):
+    owner, biz, staff = await _owner_biz_staff(db)
+    staff.phone = "+998901112233"
+    await db.commit()
+    token = await _invite_token(client, db, biz, staff, owner)
+
+    joiner = await f.create_user(db, role="customer", telegram_id=333)
+    rj = await client.post(f"/api/v1/staff/join/{token}", headers=f.auth_header(joiner.id))
+    assert rj.status_code == 403, rj.text
+
+
+async def test_b6_join_captures_phone_when_staff_record_blank(client, db):
+    owner, biz, staff = await _owner_biz_staff(db)  # staff.phone is None
+    token = await _invite_token(client, db, biz, staff, owner)
+
+    joiner = await f.create_user(db, role="customer", telegram_id=333)
+    rj = await client.post(f"/api/v1/staff/join/{token}",
+                           json={"phone": "+998901112233"},
+                           headers=f.auth_header(joiner.id))
+    assert rj.status_code == 200, rj.text
+    await db.refresh(staff)
+    assert staff.user_id == joiner.id
+    assert staff.phone == "+998901112233"  # captured from the verified joiner
+
+
 # ── B7: reminder claim prevents double-send ───────────────────────────────────
 
 async def test_b7_repeat_sweep_does_not_resend(db, sessionmaker_, monkeypatch):
