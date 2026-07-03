@@ -14,7 +14,7 @@ import logging
 from datetime import datetime, timedelta, timezone
 
 from apscheduler.schedulers.asyncio import AsyncIOScheduler
-from sqlalchemy import and_, select
+from sqlalchemy import and_, select, update
 
 from app.database import AsyncSessionLocal
 from app.models.booking import Booking, Customer, Notification
@@ -87,15 +87,32 @@ async def _send_reminders() -> None:
                     if not (window_start <= apt_datetime <= window_end):
                         continue
 
+                    # CLAIM this reminder before doing any work: flip the flag
+                    # False→True in one atomic statement and commit it. If another
+                    # sweep — or another backend instance during a deploy overlap —
+                    # already claimed it, rowcount is 0 and we skip. This is what
+                    # stops a customer getting the same reminder twice; committing
+                    # the claim per-booking also means a crash mid-sweep can't roll
+                    # back reminders that already went out.
+                    claimed = (
+                        await db.execute(
+                            update(Booking)
+                            .where(and_(Booking.id == booking.id, flag_col == False))  # noqa: E712
+                            .values(**{flag_name: True})
+                        )
+                    ).rowcount
+                    await db.commit()
+                    if not claimed:
+                        continue
+
                     customer = (
                         await db.execute(
                             select(Customer).where(Customer.id == booking.customer_id)
                         )
                     ).scalar_one_or_none()
-                    # Walk-in customers have no Telegram — skip but mark sent so
-                    # the row isn't rescanned forever.
+                    # Walk-in customers have no Telegram — nothing to send. The claim
+                    # already flagged the row so it isn't rescanned forever.
                     if not customer or not customer.telegram_id:
-                        setattr(booking, flag_name, True)
                         continue
 
                     business = (
@@ -109,8 +126,7 @@ async def _send_reminders() -> None:
                         )
                     ).scalar_one_or_none()
                     if not business or not service:
-                        setattr(booking, flag_name, True)
-                        continue
+                        continue  # claim already flagged it; retrying never helps
 
                     lang = customer.language
                     svc_name = getattr(service, f"name_{lang}", service.name_uz)
@@ -159,18 +175,19 @@ async def _send_reminders() -> None:
                             status="sent" if success else "failed",
                         )
                     )
-                    # Only mark the reminder as sent when it actually went out. A
-                    # transient Telegram failure leaves the flag False so the next
-                    # 15-min sweep retries (bounded — the booking drops out once it
-                    # leaves the ±15-min window). Permanent skips above (no
-                    # telegram_id / missing business) still set the flag, since
-                    # retrying those never helps.
-                    if success:
-                        setattr(booking, flag_name, True)
+                    # A transient Telegram failure RELEASES the claim (flag back to
+                    # False) so the next 15-min sweep retries — bounded, since the
+                    # booking drops out once it leaves the ±15-min window.
+                    if not success:
+                        await db.execute(
+                            update(Booking)
+                            .where(Booking.id == booking.id)
+                            .values(**{flag_name: False})
+                        )
+                    await db.commit()
                 except Exception:
                     logger.exception("Reminder failed for booking %s", booking.id)
-
-            await db.commit()
+                    await db.rollback()
 
 
 async def _send_reminders_safe() -> None:
@@ -189,6 +206,36 @@ async def _send_due_broadcasts_safe() -> None:
         await send_due_broadcasts()
     except Exception:
         logger.exception("Broadcast poll failed")
+
+
+async def _expire_trials() -> None:
+    """Suspend trial businesses whose 14-day window has lapsed so the booking path
+    (which rejects suspended/blocked) stops serving them — this is what makes the
+    manual-payment model enforceable. Atomic and idempotent: safe to re-run and
+    even to run under two instances (the UPDATE only touches still-trial rows)."""
+    async with AsyncSessionLocal() as db:
+        now = datetime.now(timezone.utc)
+        result = await db.execute(
+            update(Business)
+            .where(
+                and_(
+                    Business.status == "trial",
+                    Business.trial_ends_at.isnot(None),
+                    Business.trial_ends_at < now,
+                )
+            )
+            .values(status="suspended")
+        )
+        await db.commit()
+        if result.rowcount:
+            logger.info("Trial expiry: suspended %s business(es)", result.rowcount)
+
+
+async def _expire_trials_safe() -> None:
+    try:
+        await _expire_trials()
+    except Exception:
+        logger.exception("Trial-expiry sweep failed")
 
 
 def start_scheduler() -> None:
@@ -213,6 +260,16 @@ def start_scheduler() -> None:
         coalesce=True,
         max_instances=1,
         misfire_grace_time=120,
+    )
+    # Suspend lapsed trials. Every 6h is plenty — expiry is a day-granularity event.
+    scheduler.add_job(
+        _expire_trials_safe,
+        "interval",
+        hours=6,
+        id="trial_expiry",
+        coalesce=True,
+        max_instances=1,
+        misfire_grace_time=3600,
     )
     scheduler.start()
 

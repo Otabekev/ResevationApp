@@ -14,7 +14,7 @@ behind its FSM state.
 """
 import asyncio
 import re
-from datetime import date, timedelta
+from datetime import date, datetime, timedelta, timezone
 
 from aiogram import F, Router
 from aiogram.fsm.context import FSMContext
@@ -80,8 +80,20 @@ def paginate_buttons(
     return InlineKeyboardMarkup(inline_keyboard=rows)
 
 
+# Asia/Tashkent is a fixed UTC+5 (no DST, ever). Compute "today" in business-local
+# time so the picker's Today/Tomorrow labels and the first bookable day match the
+# backend (which uses Asia/Tashkent). Plain date.today() uses the server's UTC and
+# is a day behind between local midnight and 05:00 — the "Today" button then points
+# at yesterday and the backend returns no slots.
+_TASHKENT_OFFSET = timedelta(hours=5)
+
+
+def _today_local() -> date:
+    return (datetime.now(timezone.utc) + _TASHKENT_OFFSET).date()
+
+
 def date_keyboard(lang: str) -> InlineKeyboardMarkup:
-    today = date.today()
+    today = _today_local()
     rows = []
     for i in range(7):
         d = today + timedelta(days=i)

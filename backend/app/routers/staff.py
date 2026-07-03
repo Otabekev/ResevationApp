@@ -1,3 +1,4 @@
+import re
 import secrets
 from datetime import date, datetime, timedelta, timezone
 
@@ -17,6 +18,21 @@ from app.timeutils import now_local
 
 router = APIRouter(prefix="/businesses/{business_id}/staff", tags=["staff"])
 invite_router = APIRouter(tags=["staff"])
+
+_UZ_PHONE_RE = re.compile(r"^\+998\d{9}$")
+
+
+def _normalize_phone(raw: str | None) -> str | None:
+    """Canonical +998XXXXXXXXX, or None if it can't be an Uzbek number. Same rule
+    the bot and booking endpoints use, so a Telegram-shared contact matches the
+    phone the owner typed regardless of spaces/dashes/leading country code."""
+    digits = re.sub(r"[^\d]", "", raw or "")
+    if len(digits) == 9:
+        digits = "998" + digits
+    if len(digits) == 12 and digits.startswith("998"):
+        candidate = "+" + digits
+        return candidate if _UZ_PHONE_RE.match(candidate) else None
+    return None
 
 
 # ── Schemas ──────────────────────────────────────────────────────────────────
@@ -306,9 +322,23 @@ async def create_invite(
     staff = await db.get(Staff, staff_id)
     if not staff or staff.business_id != business_id:
         raise HTTPException(status_code=404, detail="Staff not found")
+    if staff.is_owner:
+        raise HTTPException(status_code=400, detail="The owner cannot be invited as staff")
+    if staff.user_id is not None:
+        raise HTTPException(status_code=409, detail="This staff member is already linked to an account")
+
+    # One live invite per staff: invalidate any earlier unused invites so a stale
+    # forwarded link can't still be redeemed after a fresh one is issued.
+    await db.execute(
+        update(StaffInvite)
+        .where(and_(StaffInvite.staff_id == staff_id, StaffInvite.is_active == True))  # noqa: E712
+        .values(is_active=False)
+    )
 
     token = secrets.token_urlsafe(32)
-    expires_at = datetime.now(timezone.utc) + timedelta(days=7)
+    # Short window (48h) — an invite is meant to be tapped promptly; a long-lived
+    # link is just a bigger forwarding target.
+    expires_at = datetime.now(timezone.utc) + timedelta(hours=48)
     invite = StaffInvite(
         business_id=business_id,
         staff_id=staff_id,
@@ -330,9 +360,17 @@ async def create_invite(
     return InviteOut(token=token, invite_url=invite_url, expires_at=expires_at)
 
 
+class JoinRequest(BaseModel):
+    # The phone the joiner shared via Telegram's "share contact" button. Verified
+    # against the staff record's phone so a forwarded link can't be redeemed by
+    # the wrong person. Optional for backward compatibility.
+    phone: str | None = None
+
+
 @invite_router.post("/staff/join/{token}")
 async def join_via_invite(
     token: str,
+    body: JoinRequest | None = None,
     user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ):
@@ -349,12 +387,39 @@ async def join_via_invite(
     invite = result.scalar_one_or_none()
     if not invite:
         raise HTTPException(status_code=404, detail="Invite not found or expired")
-    if invite.expires_at < datetime.now(timezone.utc):
+    expires_at = invite.expires_at
+    if expires_at.tzinfo is None:  # some drivers return naive for TIMESTAMPTZ — normalize
+        expires_at = expires_at.replace(tzinfo=timezone.utc)
+    if expires_at < datetime.now(timezone.utc):
         raise HTTPException(status_code=400, detail="Invite expired")
 
     staff = await db.get(Staff, invite.staff_id)
     if not staff:
         raise HTTPException(status_code=404, detail="Staff record not found")
+    if staff.is_owner:
+        raise HTTPException(status_code=400, detail="The owner cannot be invited as staff")
+    # Refuse to hand an already-claimed staff slot to a second person — a forwarded
+    # link must never be able to take over an active staff member's record (and
+    # their customers' contact details).
+    if staff.user_id is not None:
+        raise HTTPException(status_code=409, detail="This staff member is already linked to an account")
+
+    # Verify the joiner is the intended person. The owner sets the staff member's
+    # phone when creating the record; the bot has the joiner share their verified
+    # Telegram phone. If a phone is on file, the shared number MUST match it — this
+    # is what stops a forwarded link from being redeemed by the wrong person. If
+    # the owner left the phone blank, capture the shared number onto the record
+    # instead of failing (so onboarding isn't blocked).
+    shared_phone = _normalize_phone(body.phone) if (body and body.phone) else None
+    staff_phone = _normalize_phone(staff.phone)
+    if staff_phone:
+        if shared_phone != staff_phone:
+            raise HTTPException(
+                status_code=403,
+                detail="This invite is for a different phone number",
+            )
+    elif shared_phone:
+        staff.phone = shared_phone
 
     # Link the user to this staff record
     staff.user_id = user.id
