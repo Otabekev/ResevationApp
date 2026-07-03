@@ -238,6 +238,11 @@ async def create_public_booking(
     _biz = await db.get(Business, body.business_id)
     if _biz is None:
         raise HTTPException(status_code=404, detail="Business not found")
+    # Refuse bookings for a business the platform has turned off (suspended for
+    # non-payment / blocked for abuse) — the public listing hides these, but a
+    # cached deep-link or stale button could still reach this endpoint.
+    if _biz.status in ("suspended", "blocked"):
+        raise HTTPException(status_code=409, detail="This business is not accepting bookings")
     service_ids = body.service_ids if _biz.allow_multi_service else [body.service_id]
 
     try:
@@ -395,6 +400,8 @@ async def create_manual_booking(
     business = await db.get(Business, business_id)
     if not business or (business.owner_id != user.id and user.role != "super_admin"):
         raise HTTPException(status_code=403)
+    if business.status in ("suspended", "blocked"):
+        raise HTTPException(status_code=409, detail="This business is not accepting bookings")
 
     # Walk-in customers have no Telegram account. Reuse an existing walk-in
     # record with the same phone (so repeat customers keep their history)
@@ -444,6 +451,17 @@ async def create_manual_booking(
     return booking
 
 
+# Allowed booking-status transitions, keyed on the CURRENT status. Terminal states
+# (completed / no_show / cancelled_* / rescheduled) accept no further change, so a
+# finished booking can't be resurrected — which would re-fire customer messages and
+# corrupt no-show/analytics counts. Cancellation to cancelled_by_customer goes
+# through the dedicated /cancel endpoint, not here.
+_STATUS_TRANSITIONS: dict[str, set[str]] = {
+    "pending": {"confirmed", "completed", "no_show", "cancelled_by_business"},
+    "confirmed": {"completed", "no_show", "cancelled_by_business"},
+}
+
+
 @router.patch("/bookings/{booking_id}/status", response_model=BookingOut)
 async def update_booking_status(
     booking_id: int,
@@ -467,6 +485,18 @@ async def update_booking_status(
 
     if not is_owner and not is_assigned_staff and user.role != "super_admin":
         raise HTTPException(status_code=403)
+
+    # Idempotent: re-applying the current status is a no-op and must NOT re-fire
+    # the confirmation / review-prompt messages (owners double-tap on slow nets).
+    if body.status == booking.status:
+        return booking
+
+    # State machine: only forward transitions from a non-terminal status.
+    if body.status not in _STATUS_TRANSITIONS.get(booking.status, set()):
+        raise HTTPException(
+            status_code=409,
+            detail=f"Cannot change booking from '{booking.status}' to '{body.status}'",
+        )
 
     was_pending = booking.status == "pending"
     booking.status = body.status

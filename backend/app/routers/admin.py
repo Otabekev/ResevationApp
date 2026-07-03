@@ -1,9 +1,9 @@
 import hmac
 import time
-from datetime import date, datetime
+from datetime import date, datetime, timedelta, timezone
 from typing import Literal
 
-from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Query
+from fastapi import APIRouter, BackgroundTasks, Depends, Header, HTTPException, Query, Request
 from fastapi.responses import JSONResponse
 from pydantic import BaseModel, Field
 from sqlalchemy import desc, func, select
@@ -12,11 +12,13 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.config import settings
 from app.database import get_db
 from app.deps import get_current_super_admin
+from app.limiter import limiter
 from app.models.booking import Booking, Customer
 from app.models.broadcast import Broadcast
 from app.models.business import Business, BusinessCategory
 from app.models.service import Service
 from app.models.staff import Staff
+from app.models.subscription import Subscription
 from app.models.user import User
 from app.services import broadcast_service
 from app.timeutils import now_local
@@ -146,10 +148,60 @@ async def update_business_status(
     if not business:
         raise HTTPException(status_code=404)
 
+    # Approving into trial (re)starts a fresh 14-day window so the countdown runs
+    # from approval, not registration. The trial-expiry job then enforces it.
+    if body.status == "trial":
+        business.trial_ends_at = datetime.now(timezone.utc) + timedelta(days=14)
     business.status = body.status
     db.add(business)
     await db.commit()
     return {"ok": True, "status": business.status}
+
+
+class RecordPaymentRequest(BaseModel):
+    plan: Literal["basic", "premium"] = "basic"
+    months: int = Field(1, ge=1, le=36)
+    paid_amount: int | None = Field(None, ge=0)  # UZS
+    payment_note: str | None = Field(None, max_length=255)
+
+
+@router.post("/businesses/{business_id}/record-payment")
+async def record_payment(
+    business_id: int,
+    body: RecordPaymentRequest,
+    _: User = Depends(get_current_super_admin),
+    db: AsyncSession = Depends(get_db),
+):
+    """Record a manual (no-gateway) payment: activate the business and log a
+    Subscription row so revenue is auditable. Coverage runs for `months`; an
+    'active' business is never auto-suspended — renewals are recorded here."""
+    business = await db.get(Business, business_id)
+    if not business:
+        raise HTTPException(status_code=404)
+
+    now = datetime.now(timezone.utc)
+    expires_at = now + timedelta(days=30 * body.months)
+    sub = Subscription(
+        business_id=business.id,
+        plan=body.plan,
+        started_at=now,
+        expires_at=expires_at,
+        is_active=True,
+        paid_amount=body.paid_amount,
+        payment_note=body.payment_note,
+    )
+    db.add(sub)
+    business.status = "active"
+    business.trial_ends_at = expires_at
+    db.add(business)
+    await db.commit()
+    await db.refresh(sub)
+    return {
+        "ok": True,
+        "status": business.status,
+        "subscription_id": sub.id,
+        "expires_at": expires_at.isoformat(),
+    }
 
 
 @router.post("/categories")
@@ -375,9 +427,19 @@ def _in_uzbekistan(lat: float | None, lng: float | None) -> bool:
 
 
 @router.get("/growth")
-async def growth_map(secret: str = Query(""), db: AsyncSession = Depends(get_db)):
-    # Constant-time compare so the secret can't be guessed by timing.
-    if not settings.growth_secret or not hmac.compare_digest(secret, settings.growth_secret):
+@limiter.limit("30/minute")
+async def growth_map(
+    request: Request,
+    secret: str = Query(""),
+    x_growth_secret: str | None = Header(default=None, alias="X-Growth-Secret"),
+    db: AsyncSession = Depends(get_db),
+):
+    # Accept the secret via header (preferred — not kept in proxy/CDN logs or
+    # browser history) or the legacy query param. Constant-time compare so it
+    # can't be timing-guessed; rate-limited so a leaked secret can't be used to
+    # hammer this heavy feed.
+    provided = x_growth_secret or secret
+    if not settings.growth_secret or not hmac.compare_digest(provided, settings.growth_secret):
         raise HTTPException(status_code=403, detail="Forbidden")
 
     now = time.monotonic()

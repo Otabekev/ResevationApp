@@ -14,7 +14,7 @@ import logging
 from datetime import datetime, timedelta, timezone
 
 from apscheduler.schedulers.asyncio import AsyncIOScheduler
-from sqlalchemy import and_, select
+from sqlalchemy import and_, select, update
 
 from app.database import AsyncSessionLocal
 from app.models.booking import Booking, Customer, Notification
@@ -191,6 +191,36 @@ async def _send_due_broadcasts_safe() -> None:
         logger.exception("Broadcast poll failed")
 
 
+async def _expire_trials() -> None:
+    """Suspend trial businesses whose 14-day window has lapsed so the booking path
+    (which rejects suspended/blocked) stops serving them — this is what makes the
+    manual-payment model enforceable. Atomic and idempotent: safe to re-run and
+    even to run under two instances (the UPDATE only touches still-trial rows)."""
+    async with AsyncSessionLocal() as db:
+        now = datetime.now(timezone.utc)
+        result = await db.execute(
+            update(Business)
+            .where(
+                and_(
+                    Business.status == "trial",
+                    Business.trial_ends_at.isnot(None),
+                    Business.trial_ends_at < now,
+                )
+            )
+            .values(status="suspended")
+        )
+        await db.commit()
+        if result.rowcount:
+            logger.info("Trial expiry: suspended %s business(es)", result.rowcount)
+
+
+async def _expire_trials_safe() -> None:
+    try:
+        await _expire_trials()
+    except Exception:
+        logger.exception("Trial-expiry sweep failed")
+
+
 def start_scheduler() -> None:
     global last_reminder_run
     last_reminder_run = datetime.now(timezone.utc)  # grace before the first sweep
@@ -213,6 +243,16 @@ def start_scheduler() -> None:
         coalesce=True,
         max_instances=1,
         misfire_grace_time=120,
+    )
+    # Suspend lapsed trials. Every 6h is plenty — expiry is a day-granularity event.
+    scheduler.add_job(
+        _expire_trials_safe,
+        "interval",
+        hours=6,
+        id="trial_expiry",
+        coalesce=True,
+        max_instances=1,
+        misfire_grace_time=3600,
     )
     scheduler.start()
 

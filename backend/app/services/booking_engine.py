@@ -336,6 +336,11 @@ async def get_available_slots(
     business = biz_result.scalar_one_or_none()
     if business is None or not business.is_online_booking_enabled:
         return []
+    # A business the platform has turned off — suspended (non-payment) or blocked
+    # (abuse) — must not serve slots even to someone holding a cached/guessed id.
+    # 'pending' stays bookable so an owner can test their shop before approval.
+    if business.status in ("suspended", "blocked"):
+        return []
 
     # Booking-window enforcement (timezone-aware, Asia/Tashkent).
     _now = now_local()
