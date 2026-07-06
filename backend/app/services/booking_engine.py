@@ -395,24 +395,156 @@ async def get_available_slots(
     if not eligible_staff:
         return []
 
+    eligible_ids = [s.id for s in eligible_staff]
+    dow = target_date.weekday()
+
+    # ── Batch-load everything for ALL eligible staff at once ──────────────────
+    # Was ~6 sequential queries PER staff (a 15-provider shop = ~90 round-trips to
+    # an auto-suspending Neon DB on every date tap). Now it's a constant handful
+    # regardless of headcount. Semantics are preserved exactly, including the
+    # existing behavior that business-wide breaks/blocks apply to every provider.
+
+    # Business working hours for the day (the shop's open window / day-off ceiling).
+    biz_hours_row = (
+        await db.execute(
+            select(WorkingHours).where(
+                and_(
+                    WorkingHours.business_id == business_id,
+                    WorkingHours.staff_id.is_(None),
+                    WorkingHours.day_of_week == dow,
+                )
+            )
+        )
+    ).scalar_one_or_none()
+    if biz_hours_row is not None and biz_hours_row.is_day_off:
+        return []  # shop closed this day → nobody is bookable
+    biz_window = (
+        Interval(biz_hours_row.start_time, biz_hours_row.end_time)
+        if biz_hours_row is not None else None
+    )
+
+    # Staff-specific working hours (an override that narrows the business window).
+    staff_hours: dict[int, WorkingHours] = {}
+    for wh in (
+        await db.execute(
+            select(WorkingHours).where(
+                and_(WorkingHours.staff_id.in_(eligible_ids), WorkingHours.day_of_week == dow)
+            )
+        )
+    ).scalars().all():
+        staff_hours[wh.staff_id] = wh
+
+    # Breaks for the business on this day (business-wide + staff rows all carry
+    # business_id, and the old per-staff OR applied them to everyone — preserved).
+    business_breaks = [
+        Interval(b.start_time, b.end_time)
+        for b in (
+            await db.execute(
+                select(BreakTime).where(
+                    and_(
+                        BreakTime.business_id == business_id,
+                        or_(BreakTime.day_of_week == dow, BreakTime.day_of_week.is_(None)),
+                    )
+                )
+            )
+        ).scalars().all()
+    ]
+
+    # Blocked times for the business touching this date (same tz handling as before).
+    day_start = to_local(target_date, time(0, 0))
+    day_end = to_local(target_date, time(23, 59))
+    business_blocked: list[Interval] = []
+    blocked_rows = (
+        await db.execute(
+            select(BlockedTime).where(
+                and_(
+                    BlockedTime.business_id == business_id,
+                    or_(
+                        BlockedTime.blocked_date == target_date,
+                        and_(
+                            BlockedTime.start_datetime.isnot(None),
+                            BlockedTime.start_datetime <= day_end,
+                            BlockedTime.end_datetime >= day_start,
+                        ),
+                    ),
+                )
+            )
+        )
+    ).scalars().all()
+    for bt in blocked_rows:
+        if bt.full_day or (bt.blocked_date == target_date and not bt.start_datetime):
+            business_blocked.append(Interval(time(0, 0), time(23, 59)))
+        elif bt.start_datetime and bt.end_datetime:
+            local_start = _as_local(bt.start_datetime)
+            local_end = _as_local(bt.end_datetime)
+            if local_end.date() < target_date or local_start.date() > target_date:
+                continue
+            s = local_start.time() if local_start.date() == target_date else time(0, 0)
+            e = local_end.time() if local_end.date() == target_date else time(23, 59)
+            business_blocked.append(Interval(s, e))
+
+    # Existing bookings for every eligible staff, grouped by staff. Each blocks its
+    # padded window (start - buffer_before … end + buffer_after).
+    bookings_by_staff: dict[int, list[Interval]] = {sid: [] for sid in eligible_ids}
+    existing = (
+        await db.execute(
+            select(Booking).where(
+                and_(
+                    Booking.staff_id.in_(eligible_ids),
+                    Booking.booking_date == target_date,
+                    Booking.status.in_(["pending", "confirmed"]),
+                )
+            )
+        )
+    ).scalars().all()
+    if existing:
+        svc_ids = {b.service_id for b in existing}
+        svc_by_id = {
+            s.id: s
+            for s in (
+                await db.execute(select(Service).where(Service.id.in_(svc_ids)))
+            ).scalars().all()
+        }
+        for b in existing:
+            svc = svc_by_id.get(b.service_id)
+            if svc is None:
+                continue
+            block_start = _from_minutes(max(0, _to_minutes(b.start_time) - svc.buffer_before_minutes))
+            block_end = _from_minutes(_to_minutes(b.end_time) + svc.buffer_after_minutes)
+            bookings_by_staff.setdefault(b.staff_id, []).append(Interval(block_start, block_end))
+
     # Collect availability per slot time
     slot_map: dict[time, list[int]] = {}
 
     for staff in eligible_staff:
-        window = await _get_working_window(db, staff, target_date)
+        # Resolve this staff's window (staff override narrows the business window;
+        # mirrors _get_working_window, now from the preloaded rows).
+        wh = staff_hours.get(staff.id)
+        if wh is not None:
+            if wh.is_day_off:
+                continue
+            staff_window = Interval(wh.start_time, wh.end_time)
+            if biz_window is None:
+                window = staff_window
+            else:
+                w_start = max(biz_window.start, staff_window.start)
+                w_end = min(biz_window.end, staff_window.end)
+                window = Interval(w_start, w_end) if w_start < w_end else None
+        else:
+            window = biz_window
         if window is None:
             continue
 
         # Build free intervals starting from working window
         free = [window]
 
-        for brk in await _get_breaks(db, staff, target_date):
+        for brk in business_breaks:
             free = _subtract_interval(free, brk.start, brk.end)
 
-        for blk in await _get_blocked_intervals(db, staff, target_date):
+        for blk in business_blocked:
             free = _subtract_interval(free, blk.start, blk.end)
 
-        for booking_iv in await _get_booking_intervals(db, staff.id, target_date):
+        for booking_iv in bookings_by_staff.get(staff.id, []):
             free = _subtract_interval(free, booking_iv.start, booking_iv.end)
 
         # Generate valid slot start times within free intervals
