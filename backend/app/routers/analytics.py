@@ -80,7 +80,14 @@ async def get_analytics(
         .group_by(Booking.booking_date)
         .order_by(Booking.booking_date)
     )
-    daily = [{"date": str(r[0]), "bookings": r[1]} for r in daily_rows.all()]
+    # Zero-fill the last 7 calendar days so the chart always shows 7 bars — a quiet
+    # business shouldn't render as a sparse/broken-looking chart with missing days.
+    counts = {str(r[0]): r[1] for r in daily_rows.all()}
+    today = now_local().date()
+    daily = [
+        {"date": d.isoformat(), "bookings": counts.get(d.isoformat(), 0)}
+        for d in (today - timedelta(days=i) for i in range(6, -1, -1))
+    ]
 
     no_show_rate = 0
     if total:
