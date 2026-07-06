@@ -102,6 +102,28 @@ async def _staff_with_services(staff: Staff, db: AsyncSession) -> StaffOut:
     return data
 
 
+async def _staff_list_with_services(staff_list, db: AsyncSession) -> list[StaffOut]:
+    """Batch version of _staff_with_services: ONE query for every staff member's
+    service links instead of one query per staff (avoids an N+1 on the list
+    endpoints — a 20-provider shop went from 21 queries to 2)."""
+    ids = [s.id for s in staff_list]
+    by_staff: dict[int, list[int]] = {sid: [] for sid in ids}
+    if ids:
+        rows = await db.execute(
+            select(StaffService.staff_id, StaffService.service_id).where(
+                StaffService.staff_id.in_(ids)
+            )
+        )
+        for staff_id, service_id in rows.all():
+            by_staff.setdefault(staff_id, []).append(service_id)
+    out = []
+    for s in staff_list:
+        data = StaffOut.model_validate(s)
+        data.service_ids = by_staff.get(s.id, [])
+        out.append(data)
+    return out
+
+
 # ── Endpoints ────────────────────────────────────────────────────────────────
 
 @router.get("", response_model=list[StaffOut])
@@ -113,7 +135,7 @@ async def list_staff(
     await _get_owned_business(business_id, user, db)
     result = await db.execute(select(Staff).where(Staff.business_id == business_id))
     staff_list = result.scalars().all()
-    return [await _staff_with_services(s, db) for s in staff_list]
+    return await _staff_list_with_services(staff_list, db)
 
 
 @router.post("", response_model=StaffOut, status_code=status.HTTP_201_CREATED)
@@ -446,7 +468,7 @@ async def get_my_staff_profiles(
     """Returns all staff records linked to the authenticated user."""
     result = await db.execute(select(Staff).where(Staff.user_id == user.id))
     staff_list = result.scalars().all()
-    return [await _staff_with_services(s, db) for s in staff_list]
+    return await _staff_list_with_services(staff_list, db)
 
 
 @invite_router.get("/staff/me/bookings", response_model=list)

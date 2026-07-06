@@ -364,7 +364,13 @@ async def get_available_slots(
         if (cnt or 0) != len(unique_ids):
             return []
         staff_result = await db.execute(
-            select(Staff).where(and_(Staff.id == staff_id, Staff.is_active == True))
+            select(Staff).where(
+                and_(
+                    Staff.id == staff_id,
+                    Staff.business_id == business_id,  # scope to this business (defense-in-depth)
+                    Staff.is_active == True,
+                )
+            )
         )
         eligible_staff = [staff_result.scalar_one_or_none()]
         eligible_staff = [s for s in eligible_staff if s is not None]
@@ -581,7 +587,12 @@ async def create_booking(
         status="pending" if any(s.requires_confirmation for s in services) else "confirmed",
         notes=notes,
         was_auto_assigned=auto_assigned,
-        total_price_at_booking=total_price or None,
+        # Store the real sum (including a genuine 0 for free services); None only
+        # when NO selected service had a price set — so a report can tell "free"
+        # apart from "unknown".
+        total_price_at_booking=(
+            total_price if any(s.price is not None for s in services) else None
+        ),
     )
     db.add(booking)
     try:
