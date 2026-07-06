@@ -677,6 +677,13 @@ async def create_booking(
     existing_result = await db.execute(lock_stmt)
     existing_bookings = existing_result.scalars().all()
 
+    # Reject rather than silently clamp if the block would run past midnight (which
+    # would make end_time <= start_time and corrupt the stored length). The
+    # validated-slot path never triggers this; it guards against a future
+    # off-by-one (e.g. a working window ending at 23:59 with a buffered service).
+    if _to_minutes(start_time) + total_duration + trail_buffer > 1439:
+        raise ValueError("Time slot is not available")
+
     # Calculate the full blocked window for the new (possibly multi-service) booking
     end_time = _from_minutes(_to_minutes(start_time) + total_duration)
     new_block_start = _from_minutes(_to_minutes(start_time) - lead_buffer)

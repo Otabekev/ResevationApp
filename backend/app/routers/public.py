@@ -95,6 +95,11 @@ async def list_active_businesses(
 
 @router.get("/businesses/{business_id}/staff")
 async def list_public_staff(business_id: int, db: AsyncSession = Depends(get_db)):
+    # Don't expose the roster of a business the platform hasn't published (pending)
+    # or has turned off (suspended/blocked) — this is an unauthenticated endpoint.
+    biz = await db.get(Business, business_id)
+    if biz is None or biz.status not in ("active", "trial"):
+        return []
     result = await db.execute(
         select(Staff).where(and_(Staff.business_id == business_id, Staff.is_active == True))
     )
