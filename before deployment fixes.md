@@ -143,9 +143,37 @@ Double-booking prevention · emoji/`&`/`<` escaping (bot + backend) · phone nor
 - [x] B — tests green (7 new + tz-fix, full suite 136 passed / 2 skipped)
 - [x] B — merged to main + **deployed 2026-07-03** (merge `4f65e4f`). Bot + frontend redeployed from the same push.
 
-### Deploy C
-- [ ] C1–C10 scale hardening
-- [ ] C — tests green, merged, deployed
+### Deploy C (on hardening, tested, not yet deployed)
+- [x] C1 — availability batch-loads all staff data (was ~6 queries/staff → constant)
+- [x] C3 — rate limiter uses `RATE_LIMIT_STORAGE_URL` (Redis) when set, else memory
+- [x] C4 — growth feed aggregates bookings per day in SQL (no full-table scan)
+- [x] C6 — staff list batch-loads service links (no N+1)
+- [x] C7 — `/public/businesses` paginated + composite indexes (migration 0009)
+- [x] C8 — public-booking phone normalized server-side
+- [x] C9 — money rounded, not truncated
+- [x] C10 — bot confirm double-tap guard
+- [ ] **C2 — booking-list 200-cap pagination/indicator (FRONTEND — needs preview pass)**
+- [ ] **C5 — in-process web-login/location stores → Redis (INFRA-GATED: needs backend Redis provisioned; single-instance-safe as-is)**
 
-### Deploy D
-- [ ] D1–D13 polish backlog
+### Deploy D (on hardening, tested, not yet deployed)
+- [x] D3 — analytics zero-fills 7 days (chart no longer sparse)
+- [x] D4 — added missing `owner` i18n key (uz/ru/en)
+- [x] D6 — free (0) bookings store 0, not NULL
+- [x] D7 — walk-ins match on phone AND name (no merged customers)
+- [x] D8 — public staff roster gated to active/trial businesses
+- [x] D9 — explicit staff_id scoped to its business
+- [x] D10 — reject (not clamp) past-midnight booking math
+- [ ] **D1 — mobile bottom-nav "More" for Staff/Schedule (FRONTEND — preview pass)**
+- [ ] **D2 — booking-modal + Settings error/retry states (FRONTEND — preview pass)**
+- [ ] **D5 — Login layout resize handling (FRONTEND — preview pass)**
+- [ ] **D11 — Sentry + DB-backup runbook (OPS — owner)**
+- [ ] **D12 — admin business-detail coords/map (FRONTEND — preview pass)**
+- [ ] **D13 — investor-map CDN fallbacks (SKIP — QN_Investor is untouched per owner)**
+
+### Remaining, by why it's held
+- **Frontend UI (C2, D1, D2, D5, D12):** all add/modify visible elements. Held for a
+  single preview-verified pass so we don't drift the design the owner asked to keep.
+- **Infra-gated (C5):** ready the moment backend Redis is provisioned (same as C3
+  activation) — single instance is safe without it.
+- **Ops (D11):** wire Sentry + document Neon backups (owner).
+- **Skip (D13):** the QN_Investor map is owner-owned; not touched.
