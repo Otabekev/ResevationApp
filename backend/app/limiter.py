@@ -31,4 +31,7 @@ def rate_limit_key(request: Request) -> str:
     return f"ip:{get_remote_address(request)}"
 
 
-limiter = Limiter(key_func=rate_limit_key)
+# storage_uri=None → in-process memory (single-instance default). Set
+# RATE_LIMIT_STORAGE_URL to a Redis URL to make counters durable across
+# deploys/restarts and shared across instances.
+limiter = Limiter(key_func=rate_limit_key, storage_uri=settings.rate_limit_storage_url or None)

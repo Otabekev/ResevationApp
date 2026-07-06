@@ -19,10 +19,12 @@ export default function Settings() {
   const [saving, setSaving] = useState(false);
   const [toast, setToast] = useState(null);
   const [copied, setCopied] = useState(false);
+  const [error, setError] = useState(false);
 
-  useEffect(() => {
-    if (activeBusiness) {
-      getBusiness(activeBusiness.id).then((biz) => {
+  const load = () => {
+    if (!activeBusiness) return;
+    setError(false);
+    getBusiness(activeBusiness.id).then((biz) => {
         setForm({
           name: biz.name || "",
           phone: biz.phone || "",
@@ -44,9 +46,10 @@ export default function Settings() {
           custom_message_ru: biz.custom_message_ru || "",
           custom_message_en: biz.custom_message_en || "",
         });
-      }).catch(() => setToast({ message: t("error"), variant: "error" }));
-    }
-  }, [activeBusiness]);
+      }).catch(() => setError(true));
+  };
+
+  useEffect(() => { load(); }, [activeBusiness]);
 
   const set = (key, value) => setForm((f) => ({ ...f, [key]: value }));
 
@@ -78,6 +81,21 @@ export default function Settings() {
 
   if (!activeBusiness) {
     return <EmptyState icon={<IconSettings size={26} />} title={t("select_business_first")} subtitle={t("select_business_desc")} />;
+  }
+  if (error) {
+    return (
+      <div style={{ maxWidth: 720 }}>
+        <div className="page-header"><h1 className="page-title">{t("settings")}</h1></div>
+        <div className="card">
+          <EmptyState
+            icon={<IconSettings size={26} />}
+            title={t("error")}
+            subtitle={t("try_again")}
+            action={<button type="button" className="btn btn-primary" onClick={load}>{t("refresh")}</button>}
+          />
+        </div>
+      </div>
+    );
   }
   if (!form) {
     return (

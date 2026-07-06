@@ -64,6 +64,8 @@ async def list_active_businesses(
     category_id: int | None = Query(None),
     region: str | None = Query(None),
     district: str | None = Query(None),
+    limit: int = Query(100, ge=1, le=200),
+    offset: int = Query(0, ge=0),
     db: AsyncSession = Depends(get_db),
 ):
     filters = [Business.status.in_(["active", "trial"]), Business.is_online_booking_enabled == True]
@@ -74,7 +76,12 @@ async def list_active_businesses(
     if district:
         filters.append(Business.district == district)
 
-    result = await db.execute(select(Business).where(and_(*filters)).order_by(Business.name))
+    # Bounded + backed by the (district,status)/(category_id,status) composite
+    # indexes (migration 0009). A single district at launch is well under the
+    # default page; multi-district expansion should drive offset from the bot.
+    result = await db.execute(
+        select(Business).where(and_(*filters)).order_by(Business.name).limit(limit).offset(offset)
+    )
     businesses = result.scalars().all()
     return [
         {
@@ -88,6 +95,11 @@ async def list_active_businesses(
 
 @router.get("/businesses/{business_id}/staff")
 async def list_public_staff(business_id: int, db: AsyncSession = Depends(get_db)):
+    # Don't expose the roster of a business the platform hasn't published (pending)
+    # or has turned off (suspended/blocked) — this is an unauthenticated endpoint.
+    biz = await db.get(Business, business_id)
+    if biz is None or biz.status not in ("active", "trial"):
+        return []
     result = await db.execute(
         select(Staff).where(and_(Staff.business_id == business_id, Staff.is_active == True))
     )

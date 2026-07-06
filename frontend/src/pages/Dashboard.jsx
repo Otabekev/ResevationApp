@@ -74,7 +74,7 @@ export default function Dashboard() {
           getAnalytics(activeBusiness.id, 7),
           // Everything still awaiting confirmation, any upcoming date — so the
           // owner confirms from here instead of hunting day-by-day in Schedule.
-          getBookings(activeBusiness.id, { date_from: today, status: "pending" }),
+          getBookings(activeBusiness.id, { date_from: today, status: "pending", limit: 50 }),
         ]);
         if (!alive) return;
         setTodayBookings(bookings);
@@ -227,6 +227,9 @@ export default function Dashboard() {
                 </div>
               </div>
             ))}
+            {pending.length >= 50 && (
+              <p className="form-hint" style={{ marginTop: "var(--space-2)" }}>{t("list_partial")}</p>
+            )}
           </div>
         </div>
       )}

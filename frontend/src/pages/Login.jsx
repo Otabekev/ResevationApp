@@ -110,6 +110,15 @@ export default function Login() {
   const t = useT(lang);
   const navigate = useNavigate();
 
+  // Track viewport width reactively so the brand panel / mobile header switch on
+  // rotate or window resize, not only after a full reload.
+  const [isWide, setIsWide] = useState(() => window.innerWidth >= 880);
+  useEffect(() => {
+    const onResize = () => setIsWide(window.innerWidth >= 880);
+    window.addEventListener("resize", onResize);
+    return () => window.removeEventListener("resize", onResize);
+  }, []);
+
   // One nonce per page load; the deep-link and the poll share it.
   const [nonce] = useState(makeNonce);
   const tgUrl = `https://t.me/${BOT_USERNAME}?start=login_${nonce}`;
@@ -172,8 +181,8 @@ export default function Login() {
 
   return (
     <div style={{ display: "flex", minHeight: "100dvh" }}>
-      {/* Brand side (hidden on small screens via inline media trick) */}
-      {window.innerWidth >= 880 && <BrandPanel t={t} />}
+      {/* Brand side (hidden on small screens; reacts to resize/rotate) */}
+      {isWide && <BrandPanel t={t} />}
 
       {/* Form side */}
       <div
@@ -214,7 +223,7 @@ export default function Login() {
 
         <div className="animate-in" style={{ width: "100%", maxWidth: 400 }}>
           {/* Compact brand header for mobile (brand panel hidden) */}
-          {window.innerWidth < 880 && (
+          {!isWide && (
             <div style={{ display: "flex", flexDirection: "column", alignItems: "center", marginBottom: "var(--space-6)" }}>
               <span
                 aria-hidden

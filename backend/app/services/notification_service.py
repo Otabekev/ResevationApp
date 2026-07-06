@@ -118,7 +118,7 @@ def booking_confirmed_message(
     if phone:
         lines.append(f"📞 {L['phone']}: {_esc(phone)}")
     if price:
-        lines.append(f"💰 {L['price']}: {int(price):,} {L['unit']}")
+        lines.append(f"💰 {L['price']}: {round(price):,} {L['unit']}")
     lines += [
         f"📅 {L['date']}: {date_str}",
         f"🕐 {L['time']}: {time_str}",

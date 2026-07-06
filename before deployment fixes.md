@@ -133,19 +133,49 @@ Double-booking prevention · emoji/`&`/`<` escaping (bot + backend) · phone nor
 - [x] A3 — business-status gate in availability + public + manual booking (suspended/blocked rejected; pending stays bookable for owner testing)
 - [x] A4 — booking status state-machine (terminal locked, same-status no-op, forward transitions only)
 - [x] A — tests green (13 new, full suite 125 passed / 2 skipped)
-- [ ] A — merged to main + deployed  ← **awaiting owner go-ahead (see trial-expiry warning + A1 ops steps)**
+- [x] A — merged to main + **deployed 2026-07-03** (merge `4f65e4f`). Verified live: `/health` healthy, `/docs`+`/redoc`+`/openapi.json` → 404, `record-payment` route → 401 (live), growth header path → 403. **Owner ops still pending:** rotate `GROWTH_SECRET` + password-protect investor host; trial-expiry job runs within 6h.
 
 ### Deploy B
 - [x] B5 — bot date picker now computes "today" in Asia/Tashkent (fixed UTC+5, no tzdata dependency); no more dead "Today" button / shifted labels overnight
 - [x] B6 — staff-invite hardening + **identity binding (fully closed)**: can't invite or join an already-linked slot (409) or the owner slot (400); one live invite at a time; 48h expiry; tz-safe expiry check. **The forwarding hole is now closed:** on tapping the link the bot has the joiner share their Telegram phone via a one-tap button, and the backend verifies it against `staff.phone` (mismatch → 403; owner left it blank → captures the verified number onto the record). A forwarded link can no longer be redeemed by the wrong person.
 - [x] B7 — reminder sweep claims each row atomically before sending + commits per-booking; a repeat/overlapping sweep sends nothing (no duplicate reminders), and a mid-sweep crash can't roll back sent flags
 - [x] B8 — advisory lock (`pg_advisory_xact_lock`) serializes same-staff+date inserts so buffer-only overlaps can't both commit (Postgres-only; no-op on SQLite)
-- [x] B — tests green (7 new + tz-fix, full suite 132 passed / 2 skipped)
-- [ ] B — merged to main + deployed  ← **awaiting owner go-ahead**
+- [x] B — tests green (7 new + tz-fix, full suite 136 passed / 2 skipped)
+- [x] B — merged to main + **deployed 2026-07-03** (merge `4f65e4f`). Bot + frontend redeployed from the same push.
 
-### Deploy C
-- [ ] C1–C10 scale hardening
-- [ ] C — tests green, merged, deployed
+### Deploy C (on hardening, tested, not yet deployed)
+- [x] C1 — availability batch-loads all staff data (was ~6 queries/staff → constant)
+- [x] C3 — rate limiter uses `RATE_LIMIT_STORAGE_URL` (Redis) when set, else memory
+- [x] C4 — growth feed aggregates bookings per day in SQL (no full-table scan)
+- [x] C6 — staff list batch-loads service links (no N+1)
+- [x] C7 — `/public/businesses` paginated + composite indexes (migration 0009)
+- [x] C8 — public-booking phone normalized server-side
+- [x] C9 — money rounded, not truncated
+- [x] C10 — bot confirm double-tap guard
+- [x] C2 — day-view shows a "partial list" hint at the 200 cap; dashboard pending bound to 50 + hint
+- [ ] **C5 — in-process web-login/location stores → Redis (INFRA-GATED: needs backend Redis provisioned; single-instance-safe as-is)**
 
-### Deploy D
-- [ ] D1–D13 polish backlog
+### Deploy D (on hardening, tested, not yet deployed)
+- [x] D3 — analytics zero-fills 7 days (chart no longer sparse)
+- [x] D4 — added missing `owner` i18n key (uz/ru/en)
+- [x] D6 — free (0) bookings store 0, not NULL
+- [x] D7 — walk-ins match on phone AND name (no merged customers)
+- [x] D8 — public staff roster gated to active/trial businesses
+- [x] D9 — explicit staff_id scoped to its business
+- [x] D10 — reject (not clamp) past-midnight booking math
+- [x] D2 — Settings shows an error + retry (was an infinite skeleton on a failed load)
+- [x] D5 — Login layout reacts to resize/rotate (verified live in preview)
+- [x] D12 — admin business-detail shows coordinates (or 📍 — when none) so pins are auditable
+- [ ] **D1 — mobile bottom-nav "More" for Staff/Schedule (DEFERRED — needs a new icon + nav styling; Staff/Schedule are already reachable via the Dashboard quick-links, and I can't visually verify the nav without an authed session)**
+- [ ] **D2-modal — booking-modal empty-dropdown vs load-error nuance (DEFERRED — lesser; the main error-state case, Settings, is done)**
+- [ ] **D11 — Sentry + DB-backup runbook (OPS — owner)**
+- [ ] **D13 — investor-map CDN fallbacks (SKIP — QN_Investor is untouched per owner)**
+
+### Remaining, by why it's held
+- **Infra-gated (C5):** ready the moment backend Redis is provisioned (same as C3
+  activation) — single instance is safe without it.
+- **Deferred UI (D1, D2-modal):** D1 adds a nav element (Staff/Schedule reachable via
+  Dashboard already); D2-modal is a minor error-nuance. Both best done with a live
+  authed preview so the design stays as-is.
+- **Ops (D11):** wire Sentry + document Neon backups (owner).
+- **Skip (D13):** the QN_Investor map is owner-owned; not touched.

@@ -322,6 +322,11 @@ export default function Bookings() {
               </div>
             );
           })}
+          {bookings.length >= 200 && (
+            <p className="form-hint" style={{ textAlign: "center", color: "var(--warning)" }}>
+              {t("list_partial")}
+            </p>
+          )}
         </div>
       )}
 

@@ -103,6 +103,9 @@ export default function AdminBusinessDetail() {
           <p className="page-subtitle">
             {data.district || "—"}{data.region ? `, ${data.region}` : ""}
             {data.address ? ` · ${data.address}` : ""}
+            {data.latitude != null && data.longitude != null
+              ? ` · 📍 ${Number(data.latitude).toFixed(5)}, ${Number(data.longitude).toFixed(5)}`
+              : " · 📍 —"}
           </p>
         </div>
       </div>

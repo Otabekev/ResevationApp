@@ -79,6 +79,16 @@ class BookingCreatePublic(BaseModel):
     def _lang(cls, v: str) -> str:
         return v if v in ("uz", "ru", "en") else "uz"
 
+    @field_validator("customer_phone")
+    @classmethod
+    def _valid_phone(cls, v: str) -> str:
+        # Normalize server-side too (the bot already does, but a Mini App or any
+        # future caller must not be able to store junk the owner can't call back).
+        normalized = _normalize_uz_phone(v)
+        if normalized is None:
+            raise ValueError("Enter a valid phone, e.g. +998 90 123 45 67")
+        return normalized
+
     _fill_service_ids = model_validator(mode="after")(_normalize_service_ids)
 
 
@@ -403,9 +413,11 @@ async def create_manual_booking(
     if business.status in ("suspended", "blocked"):
         raise HTTPException(status_code=409, detail="This business is not accepting bookings")
 
-    # Walk-in customers have no Telegram account. Reuse an existing walk-in
-    # record with the same phone (so repeat customers keep their history)
-    # instead of inserting a duplicate each time.
+    # Walk-in customers have no Telegram account. Reuse an existing walk-in record
+    # with the same phone AND name (so a repeat customer keeps their history)
+    # instead of inserting a duplicate. Matching on name too means two different
+    # people who share a phone (a family landline, a shop's shared number) stay
+    # distinct records rather than one whose name flips to whoever booked last.
     customer = (
         await db.execute(
             select(Customer)
@@ -413,6 +425,7 @@ async def create_manual_booking(
                 and_(
                     Customer.telegram_id.is_(None),
                     Customer.phone == body.customer_phone,
+                    Customer.name == body.customer_name,
                 )
             )
             .limit(1)
@@ -426,8 +439,7 @@ async def create_manual_booking(
         )
         db.add(customer)
         await db.flush()
-    else:
-        customer.name = body.customer_name
+    # Matched record already has this exact name — nothing to overwrite.
 
     service_ids = body.service_ids if business.allow_multi_service else [body.service_id]
     try:
