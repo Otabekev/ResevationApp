@@ -64,6 +64,8 @@ async def list_active_businesses(
     category_id: int | None = Query(None),
     region: str | None = Query(None),
     district: str | None = Query(None),
+    limit: int = Query(100, ge=1, le=200),
+    offset: int = Query(0, ge=0),
     db: AsyncSession = Depends(get_db),
 ):
     filters = [Business.status.in_(["active", "trial"]), Business.is_online_booking_enabled == True]
@@ -74,7 +76,12 @@ async def list_active_businesses(
     if district:
         filters.append(Business.district == district)
 
-    result = await db.execute(select(Business).where(and_(*filters)).order_by(Business.name))
+    # Bounded + backed by the (district,status)/(category_id,status) composite
+    # indexes (migration 0009). A single district at launch is well under the
+    # default page; multi-district expansion should drive offset from the bot.
+    result = await db.execute(
+        select(Business).where(and_(*filters)).order_by(Business.name).limit(limit).offset(offset)
+    )
     businesses = result.scalars().all()
     return [
         {

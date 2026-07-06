@@ -23,6 +23,11 @@ class Settings(BaseSettings):
 
     # Redis
     redis_url: str = "redis://redis:6379/0"
+    # Optional: point rate-limit counters at Redis so they survive deploys/restarts
+    # and would work across >1 instance. Empty → in-process memory (fine for a
+    # single instance; it just resets on restart). Set RATE_LIMIT_STORAGE_URL to a
+    # real Redis URL when you provision backend Redis (the Upstash paid-tier item).
+    rate_limit_storage_url: str = ""
 
     # Security
     secret_key: str

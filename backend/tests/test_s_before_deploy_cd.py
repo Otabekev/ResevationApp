@@ -69,3 +69,15 @@ async def test_d7_shared_phone_different_names_stay_distinct(client, db):
                            json={**base, "start_time": "11:00:00", "customer_name": "Vali"})
     assert r1.status_code == 201 and r2.status_code == 201, (r1.text, r2.text)
     assert r1.json()["customer_id"] != r2.json()["customer_id"], "different people must not merge"
+
+
+# ── C7: public business browse is paginated ───────────────────────────────────
+
+async def test_c7_public_businesses_respects_limit(client, db):
+    owner = await f.create_user(db, role="business_owner", telegram_id=111)
+    cat = await f.create_category(db)
+    for i in range(3):
+        await f.create_business(db, owner_id=owner.id, category_id=cat.id,
+                                name=f"Biz{i}", status="active")
+    r = await client.get("/api/v1/public/businesses", params={"limit": 2})
+    assert r.status_code == 200 and len(r.json()) == 2, r.text
