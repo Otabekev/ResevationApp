@@ -152,7 +152,7 @@ Double-booking prevention · emoji/`&`/`<` escaping (bot + backend) · phone nor
 - [x] C8 — public-booking phone normalized server-side
 - [x] C9 — money rounded, not truncated
 - [x] C10 — bot confirm double-tap guard
-- [ ] **C2 — booking-list 200-cap pagination/indicator (FRONTEND — needs preview pass)**
+- [x] C2 — day-view shows a "partial list" hint at the 200 cap; dashboard pending bound to 50 + hint
 - [ ] **C5 — in-process web-login/location stores → Redis (INFRA-GATED: needs backend Redis provisioned; single-instance-safe as-is)**
 
 ### Deploy D (on hardening, tested, not yet deployed)
@@ -163,17 +163,19 @@ Double-booking prevention · emoji/`&`/`<` escaping (bot + backend) · phone nor
 - [x] D8 — public staff roster gated to active/trial businesses
 - [x] D9 — explicit staff_id scoped to its business
 - [x] D10 — reject (not clamp) past-midnight booking math
-- [ ] **D1 — mobile bottom-nav "More" for Staff/Schedule (FRONTEND — preview pass)**
-- [ ] **D2 — booking-modal + Settings error/retry states (FRONTEND — preview pass)**
-- [ ] **D5 — Login layout resize handling (FRONTEND — preview pass)**
+- [x] D2 — Settings shows an error + retry (was an infinite skeleton on a failed load)
+- [x] D5 — Login layout reacts to resize/rotate (verified live in preview)
+- [x] D12 — admin business-detail shows coordinates (or 📍 — when none) so pins are auditable
+- [ ] **D1 — mobile bottom-nav "More" for Staff/Schedule (DEFERRED — needs a new icon + nav styling; Staff/Schedule are already reachable via the Dashboard quick-links, and I can't visually verify the nav without an authed session)**
+- [ ] **D2-modal — booking-modal empty-dropdown vs load-error nuance (DEFERRED — lesser; the main error-state case, Settings, is done)**
 - [ ] **D11 — Sentry + DB-backup runbook (OPS — owner)**
-- [ ] **D12 — admin business-detail coords/map (FRONTEND — preview pass)**
 - [ ] **D13 — investor-map CDN fallbacks (SKIP — QN_Investor is untouched per owner)**
 
 ### Remaining, by why it's held
-- **Frontend UI (C2, D1, D2, D5, D12):** all add/modify visible elements. Held for a
-  single preview-verified pass so we don't drift the design the owner asked to keep.
 - **Infra-gated (C5):** ready the moment backend Redis is provisioned (same as C3
   activation) — single instance is safe without it.
+- **Deferred UI (D1, D2-modal):** D1 adds a nav element (Staff/Schedule reachable via
+  Dashboard already); D2-modal is a minor error-nuance. Both best done with a live
+  authed preview so the design stays as-is.
 - **Ops (D11):** wire Sentry + document Neon backups (owner).
 - **Skip (D13):** the QN_Investor map is owner-owned; not touched.
