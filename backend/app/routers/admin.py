@@ -496,10 +496,20 @@ async def growth_map(
 
         bookings_by_week: dict[int, int] = {}
         if earliest:
-            for (created,) in (await db.execute(select(Booking.created_at))).all():
-                if created:
-                    w = max(1, _week_of(created))
-                    bookings_by_week[w] = bookings_by_week.get(w, 0) + 1
+            # Aggregate per DAY in SQL (≤365 rows/yr), then fold days into weeks —
+            # instead of streaming every booking row into Python. func.date() works
+            # on both Postgres and SQLite, so this stays cross-dialect.
+            day_rows = (
+                await db.execute(
+                    select(func.date(Booking.created_at), func.count(Booking.id))
+                    .where(Booking.created_at.isnot(None))
+                    .group_by(func.date(Booking.created_at))
+                )
+            ).all()
+            for day_val, cnt in day_rows:
+                d = day_val if isinstance(day_val, date) else date.fromisoformat(str(day_val)[:10])
+                w = max(1, (d - earliest.date()).days // 7 + 1)
+                bookings_by_week[w] = bookings_by_week.get(w, 0) + cnt
 
         max_w = max([1, *new_by_week.keys(), *bookings_by_week.keys()])
         weekly = []

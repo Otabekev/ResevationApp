@@ -719,6 +719,17 @@ async def booking_confirm(callback: CallbackQuery, state: FSMContext) -> None:
     data = await state.get_data()
     lang = data.get("lang", "uz")
 
+    # Guard against a double-tap on a slow backend (Neon cold-start can take
+    # seconds): leave the confirming state NOW so a second tap no longer matches
+    # this handler, and strip the keyboard so there's nothing left to tap. Without
+    # this the second tap fired a duplicate create — the server dedup then bounced
+    # it back as a confusing "slot taken (by yourself)".
+    await state.set_state(None)
+    try:
+        await callback.message.edit_reply_markup(reply_markup=None)
+    except Exception:
+        pass
+
     try:
         await api_client.create_booking({
             "business_id": data["business_id"],
@@ -742,8 +753,8 @@ async def booking_confirm(callback: CallbackQuery, state: FSMContext) -> None:
         result_text = t("booking_failed", lang)
         booking_ok = False
 
-    # Keep lang/auth in state but clear the FSM step + booking draft.
-    await state.set_state(None)
+    # Keep lang/auth in state but clear the booking draft (FSM step already exited
+    # above to block a double-tap).
     await state.update_data(
         booking_date=None, start_time=None, service_id=None, staff_id=None,
         service_name=None, staff_name=None, service_price=None,
