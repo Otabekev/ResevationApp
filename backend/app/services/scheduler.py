@@ -60,8 +60,12 @@ async def _send_reminders() -> None:
             (24, Booking.reminder_24h_sent, "reminder_24h_sent"),
             (1, Booking.reminder_1h_sent, "reminder_1h_sent"),
         ]:
-            window_start = now + timedelta(hours=hours_until - 0.25)
-            window_end = now + timedelta(hours=hours_until + 0.25)
+            # Fire when the reminder's time has ARRIVED (due-or-overdue), not only
+            # inside a narrow ±15-min window. A symmetric window skips a booking
+            # FOREVER if a long sweep gap (a >30-min deploy / scheduler stall) lets
+            # the appointment pass entirely through it. reminder_at = apt − H; we
+            # fire once now has reached it.
+            reminder_offset = timedelta(hours=hours_until)
 
             # Pending bookings (a service with requires_confirmation=True is
             # created pending, booking_engine.py) hold their slot exactly like
@@ -84,7 +88,17 @@ async def _send_reminders() -> None:
                     # Booking times are stored in business-local time (Asia/Tashkent);
                     # convert to UTC before comparing against the UTC reminder window.
                     apt_datetime = to_utc(booking.booking_date, booking.start_time)
-                    if not (window_start <= apt_datetime <= window_end):
+                    reminder_at = apt_datetime - reminder_offset
+                    # Not due yet, or the appointment is already past → skip.
+                    if not (reminder_at <= now < apt_datetime):
+                        continue
+                    # Don't fire an H-hour reminder for a booking created AFTER that
+                    # mark (a booking made 20h out must not get a "24h" reminder).
+                    # The 30-min tolerance keeps genuine ~H-out bookings firing.
+                    created = booking.created_at
+                    if created is not None and created.tzinfo is None:
+                        created = created.replace(tzinfo=timezone.utc)
+                    if created is not None and created > reminder_at + timedelta(minutes=30):
                         continue
 
                     # CLAIM this reminder before doing any work: flip the flag
