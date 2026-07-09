@@ -57,6 +57,8 @@ export default function Dashboard() {
   const [pending, setPending] = useState([]);
   const [analytics, setAnalytics] = useState(null);
   const [loading, setLoading] = useState(true);
+  const [error, setError] = useState(false);
+  const [retry, setRetry] = useState(0);
   const [toast, setToast] = useState(null);
 
   useEffect(() => {
@@ -67,6 +69,7 @@ export default function Dashboard() {
     let alive = true;
     const load = async () => {
       setLoading(true);
+      setError(false);
       try {
         const today = dayjs().format("YYYY-MM-DD");
         const [bookings, stats, pend] = await Promise.all([
@@ -82,13 +85,14 @@ export default function Dashboard() {
         setPending(pend);
       } catch (e) {
         console.error(e);
+        if (alive) setError(true);
       } finally {
         if (alive) setLoading(false);
       }
     };
     load();
     return () => { alive = false; };
-  }, [activeBusiness]);
+  }, [activeBusiness, retry]);
 
   // Confirm / decline a pending booking right from the dashboard. Optimistic:
   // remove it from the list immediately, restore it if the call fails.
@@ -157,6 +161,52 @@ export default function Dashboard() {
             icon={<IconClock size={26} />}
             title={t("awaiting_approval_title")}
             subtitle={t("awaiting_approval_desc")}
+          />
+        </div>
+      </div>
+    );
+  }
+
+  // Turned off by the platform (suspended / blocked). New bookings are refused
+  // server-side, so a normal dashboard would just fail when the owner tries to add
+  // one — show a clear "paused" screen instead of an app that looks broken.
+  if (activeBusiness?.status === "suspended" || activeBusiness?.status === "blocked") {
+    return (
+      <div className="animate-in">
+        <div className="page-header">
+          <div>
+            <div className="eyebrow" style={{ display: "flex", alignItems: "center", gap: 6 }}>
+              <IconBan size={13} /> {t(`status_${activeBusiness.status}`)}
+            </div>
+            <h1 className="page-title" style={{ marginTop: 4 }}>{activeBusiness.name}</h1>
+          </div>
+        </div>
+        <div className="card" style={{ borderLeft: "3px solid var(--danger)" }}>
+          <EmptyState
+            icon={<IconBan size={26} />}
+            title={t("business_paused_title")}
+            subtitle={t("business_paused_desc")}
+          />
+        </div>
+      </div>
+    );
+  }
+
+  // Dashboard data failed to load (Neon cold-start / transient) for an ACTIVE
+  // business — show a retry rather than a blank dashboard that reads as "empty".
+  if (error) {
+    return (
+      <div className="animate-in">
+        <div className="page-header"><h1 className="page-title">{t("dashboard")}</h1></div>
+        <div className="card">
+          <EmptyState
+            title={t("error")}
+            subtitle={t("try_again")}
+            action={
+              <button type="button" className="btn btn-primary" onClick={() => setRetry((r) => r + 1)}>
+                {t("refresh")}
+              </button>
+            }
           />
         </div>
       </div>
