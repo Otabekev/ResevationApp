@@ -340,9 +340,12 @@ async def set_language(callback: CallbackQuery, state: FSMContext) -> None:
             await callback.answer()
             return
         text, kb = await booking._categories_view(new_lang)
+        # On a backend blip _categories_view returns (None, None); without a
+        # fallback keyboard the error screen would have NO buttons, stranding the
+        # user. Give them the main menu so there's always a way forward.
         await callback.message.edit_text(
             text if text is not None else t("server_error", new_lang),
-            reply_markup=kb,
+            reply_markup=kb if kb is not None else main_menu_keyboard(new_lang),
         )
     elif data.get("pending_action") == "book" and data.get("business_id"):
         await state.update_data(pending_action=None)

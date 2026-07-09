@@ -434,15 +434,18 @@ async def get_available_slots(
     ).scalars().all():
         staff_hours[wh.staff_id] = wh
 
-    # Breaks for the business on this day (business-wide + staff rows all carry
-    # business_id, and the old per-staff OR applied them to everyone — preserved).
-    business_breaks = [
-        Interval(b.start_time, b.end_time)
+    # Breaks that apply this day, tagged with (business_id, staff_id): business-wide
+    # rows (business_id set) apply to everyone; staff-scoped rows apply only to that
+    # staff. Filtering per-staff below preserves the old per-staff
+    # `or_(staff_id==S, business_id==biz)` semantics in a single query (and, unlike
+    # the earlier batch version, no longer silently drops staff-scoped rows).
+    break_items = [
+        (Interval(b.start_time, b.end_time), b.business_id, b.staff_id)
         for b in (
             await db.execute(
                 select(BreakTime).where(
                     and_(
-                        BreakTime.business_id == business_id,
+                        or_(BreakTime.business_id == business_id, BreakTime.staff_id.in_(eligible_ids)),
                         or_(BreakTime.day_of_week == dow, BreakTime.day_of_week.is_(None)),
                     )
                 )
@@ -450,15 +453,15 @@ async def get_available_slots(
         ).scalars().all()
     ]
 
-    # Blocked times for the business touching this date (same tz handling as before).
+    # Blocked times touching this date (same tz handling), tagged the same way.
     day_start = to_local(target_date, time(0, 0))
     day_end = to_local(target_date, time(23, 59))
-    business_blocked: list[Interval] = []
+    blocked_items: list[tuple] = []
     blocked_rows = (
         await db.execute(
             select(BlockedTime).where(
                 and_(
-                    BlockedTime.business_id == business_id,
+                    or_(BlockedTime.business_id == business_id, BlockedTime.staff_id.in_(eligible_ids)),
                     or_(
                         BlockedTime.blocked_date == target_date,
                         and_(
@@ -473,7 +476,7 @@ async def get_available_slots(
     ).scalars().all()
     for bt in blocked_rows:
         if bt.full_day or (bt.blocked_date == target_date and not bt.start_datetime):
-            business_blocked.append(Interval(time(0, 0), time(23, 59)))
+            blocked_items.append((Interval(time(0, 0), time(23, 59)), bt.business_id, bt.staff_id))
         elif bt.start_datetime and bt.end_datetime:
             local_start = _as_local(bt.start_datetime)
             local_end = _as_local(bt.end_datetime)
@@ -481,7 +484,7 @@ async def get_available_slots(
                 continue
             s = local_start.time() if local_start.date() == target_date else time(0, 0)
             e = local_end.time() if local_end.date() == target_date else time(23, 59)
-            business_blocked.append(Interval(s, e))
+            blocked_items.append((Interval(s, e), bt.business_id, bt.staff_id))
 
     # Existing bookings for every eligible staff, grouped by staff. Each blocks its
     # padded window (start - buffer_before … end + buffer_after).
@@ -538,11 +541,13 @@ async def get_available_slots(
         # Build free intervals starting from working window
         free = [window]
 
-        for brk in business_breaks:
-            free = _subtract_interval(free, brk.start, brk.end)
+        for iv, bid, sid in break_items:
+            if bid == business_id or sid == staff.id:
+                free = _subtract_interval(free, iv.start, iv.end)
 
-        for blk in business_blocked:
-            free = _subtract_interval(free, blk.start, blk.end)
+        for iv, bid, sid in blocked_items:
+            if bid == business_id or sid == staff.id:
+                free = _subtract_interval(free, iv.start, iv.end)
 
         for booking_iv in bookings_by_staff.get(staff.id, []):
             free = _subtract_interval(free, booking_iv.start, booking_iv.end)

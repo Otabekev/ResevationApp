@@ -6,7 +6,7 @@ from typing import Literal
 from fastapi import APIRouter, BackgroundTasks, Depends, Header, HTTPException, Query, Request
 from fastapi.responses import JSONResponse
 from pydantic import BaseModel, Field
-from sqlalchemy import desc, func, select
+from sqlalchemy import and_, desc, func, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.config import settings
@@ -16,6 +16,7 @@ from app.limiter import limiter
 from app.models.booking import Booking, Customer
 from app.models.broadcast import Broadcast
 from app.models.business import Business, BusinessCategory
+from app.models.schedule import WorkingHours
 from app.models.service import Service
 from app.models.staff import Staff
 from app.models.subscription import Subscription
@@ -109,12 +110,13 @@ async def list_all_businesses(
     status_filter: str | None = Query(None, alias="status"),
     region: str | None = Query(None),
     district: str | None = Query(None),
+    q: str | None = Query(None, description="search by name / district / region"),
     page: int = Query(1, ge=1),
     page_size: int = Query(20, ge=1, le=100),
     _: User = Depends(get_current_super_admin),
     db: AsyncSession = Depends(get_db),
 ):
-    from sqlalchemy import and_
+    from sqlalchemy import and_, or_
 
     filters = []
     if status_filter:
@@ -123,14 +125,28 @@ async def list_all_businesses(
         filters.append(Business.region == region)
     if district:
         filters.append(Business.district == district)
+    # Server-side search so the admin can find ANY business, not just the current
+    # page (the old client-side filter only searched the 20 loaded rows).
+    if q and q.strip():
+        like = f"%{q.strip()}%"
+        filters.append(or_(
+            Business.name.ilike(like),
+            Business.district.ilike(like),
+            Business.region.ilike(like),
+        ))
 
-    stmt = select(Business)
-    if filters:
-        stmt = stmt.where(and_(*filters))
-    stmt = stmt.offset((page - 1) * page_size).limit(page_size)
+    where = and_(*filters) if filters else None
+    count_stmt = select(func.count(Business.id))
+    list_stmt = select(Business).order_by(Business.name)
+    if where is not None:
+        count_stmt = count_stmt.where(where)
+        list_stmt = list_stmt.where(where)
 
-    result = await db.execute(stmt)
-    return result.scalars().all()
+    total = await db.scalar(count_stmt) or 0
+    result = await db.execute(list_stmt.offset((page - 1) * page_size).limit(page_size))
+    # Return a total so the UI can paginate; the old bare-array response silently
+    # capped the admin at the first 20 rows per status bucket.
+    return {"items": result.scalars().all(), "total": total, "page": page, "page_size": page_size}
 
 
 @router.patch("/businesses/{business_id}/status")
@@ -235,19 +251,228 @@ async def update_category(
     return cat
 
 
-@router.get("/users", response_model=list[AdminUserOut])
+@router.get("/users")
 async def list_users(
     role: str | None = Query(None),
+    q: str | None = Query(None, description="search by name / @username / telegram id"),
     page: int = Query(1, ge=1),
+    page_size: int = Query(20, ge=1, le=100),
     _: User = Depends(get_current_super_admin),
     db: AsyncSession = Depends(get_db),
 ):
-    stmt = select(User)
+    filters = []
     if role:
-        stmt = stmt.where(User.role == role)
-    stmt = stmt.offset((page - 1) * 20).limit(20)
-    result = await db.execute(stmt)
-    return result.scalars().all()
+        filters.append(User.role == role)
+    if q and q.strip():
+        term = q.strip().lstrip("@")
+        like = f"%{term}%"
+        conds = [User.name.ilike(like), User.username.ilike(like)]
+        if term.isdigit():
+            conds.append(User.telegram_id == int(term))
+        filters.append(or_(*conds))
+
+    where = and_(*filters) if filters else None
+    count_stmt = select(func.count(User.id))
+    list_stmt = select(User).order_by(desc(User.created_at))
+    if where is not None:
+        count_stmt = count_stmt.where(where)
+        list_stmt = list_stmt.where(where)
+
+    total = await db.scalar(count_stmt) or 0
+    rows = (await db.execute(list_stmt.offset((page - 1) * page_size).limit(page_size))).scalars().all()
+    return {
+        "items": [AdminUserOut.model_validate(u) for u in rows],
+        "total": total,
+        "page": page,
+        "page_size": page_size,
+    }
+
+
+class UserActiveUpdate(BaseModel):
+    is_active: bool
+
+
+@router.patch("/users/{user_id}/active")
+async def set_user_active(
+    user_id: int,
+    body: UserActiveUpdate,
+    admin: User = Depends(get_current_super_admin),
+    db: AsyncSession = Depends(get_db),
+):
+    """Ban (is_active=False) or reactivate a user. get_current_user re-checks
+    is_active on every request, so a ban takes effect on the user's next call.
+    Super-admins and your own account are protected."""
+    target = await db.get(User, user_id)
+    if not target:
+        raise HTTPException(status_code=404, detail="User not found")
+    if target.id == admin.id:
+        raise HTTPException(status_code=400, detail="Cannot change your own account")
+    if target.role == "super_admin":
+        raise HTTPException(status_code=403, detail="Cannot change a super admin")
+    target.is_active = body.is_active
+    db.add(target)
+    await db.commit()
+    return {"ok": True, "id": target.id, "is_active": target.is_active}
+
+
+# ── Operator control: needs-attention, booking lookup, insights, health ──────
+
+@router.get("/needs-attention")
+async def needs_attention(
+    _: User = Depends(get_current_super_admin),
+    db: AsyncSession = Depends(get_db),
+):
+    """Active/trial businesses that can't actually serve a customer yet — missing
+    services, staff, working hours, or a location. Lets the operator chase them
+    before a customer books into an empty shop."""
+    biz_rows = (
+        await db.execute(select(Business).where(Business.status.in_(["active", "trial"])))
+    ).scalars().all()
+    ids = [b.id for b in biz_rows]
+    if not ids:
+        return {"items": [], "total": 0}
+
+    svc_counts = dict(
+        (await db.execute(
+            select(Service.business_id, func.count(Service.id))
+            .where(Service.business_id.in_(ids)).group_by(Service.business_id)
+        )).all()
+    )
+    staff_counts = dict(
+        (await db.execute(
+            select(Staff.business_id, func.count(Staff.id))
+            .where(Staff.business_id.in_(ids)).group_by(Staff.business_id)
+        )).all()
+    )
+    hours_biz = {
+        row[0] for row in (await db.execute(
+            select(WorkingHours.business_id)
+            .where(and_(WorkingHours.business_id.in_(ids), WorkingHours.staff_id.is_(None)))
+            .distinct()
+        )).all()
+    }
+
+    items = []
+    for b in biz_rows:
+        missing = []
+        if svc_counts.get(b.id, 0) == 0:
+            missing.append("services")
+        if staff_counts.get(b.id, 0) == 0:
+            missing.append("staff")
+        if b.id not in hours_biz:
+            missing.append("hours")
+        if b.latitude is None or b.longitude is None:
+            missing.append("location")
+        if missing:
+            items.append({
+                "id": b.id, "name": b.name, "status": b.status,
+                "district": b.district, "missing": missing,
+            })
+    items.sort(key=lambda x: len(x["missing"]), reverse=True)
+    return {"items": items, "total": len(items)}
+
+
+@router.get("/bookings/search")
+async def search_bookings(
+    q: str | None = Query(None, description="customer phone or name"),
+    business_id: int | None = Query(None),
+    booking_date: date | None = Query(None),
+    page: int = Query(1, ge=1),
+    page_size: int = Query(20, ge=1, le=100),
+    _: User = Depends(get_current_super_admin),
+    db: AsyncSession = Depends(get_db),
+):
+    """Platform-wide booking lookup for support (a customer/owner complaint)."""
+    filters = []
+    if business_id:
+        filters.append(Booking.business_id == business_id)
+    if booking_date:
+        filters.append(Booking.booking_date == booking_date)
+    if q and q.strip():
+        like = f"%{q.strip()}%"
+        filters.append(or_(Booking.customer_phone.ilike(like), Booking.customer_name.ilike(like)))
+
+    where = and_(*filters) if filters else None
+    count_stmt = select(func.count(Booking.id))
+    list_stmt = (
+        select(Booking, Business.name, Service.name_uz)
+        .join(Business, Business.id == Booking.business_id, isouter=True)
+        .join(Service, Service.id == Booking.service_id, isouter=True)
+        .order_by(desc(Booking.booking_date), desc(Booking.start_time))
+    )
+    if where is not None:
+        count_stmt = count_stmt.where(where)
+        list_stmt = list_stmt.where(where)
+
+    total = await db.scalar(count_stmt) or 0
+    rows = (await db.execute(list_stmt.offset((page - 1) * page_size).limit(page_size))).all()
+    items = []
+    for b, biz_name, svc_name in rows:
+        row = _booking_row(b, biz_name, svc_name)
+        row["customer_phone"] = b.customer_phone
+        items.append(row)
+    return {"items": items, "total": total, "page": page, "page_size": page_size}
+
+
+@router.get("/insights")
+async def get_insights(
+    _: User = Depends(get_current_super_admin),
+    db: AsyncSession = Depends(get_db),
+):
+    """Platform pulse: 7-day booking trend, no-show rate, top businesses."""
+    today = now_local().date()
+
+    day_rows = {
+        str(r[0]): r[1]
+        for r in (await db.execute(
+            select(Booking.booking_date, func.count(Booking.id))
+            .where(Booking.booking_date >= today - timedelta(days=6))
+            .group_by(Booking.booking_date)
+        )).all()
+    }
+    daily = [
+        {"date": d.isoformat(), "bookings": day_rows.get(d.isoformat(), 0)}
+        for d in (today - timedelta(days=i) for i in range(6, -1, -1))
+    ]
+
+    total = await db.scalar(select(func.count(Booking.id))) or 0
+    no_shows = await db.scalar(select(func.count(Booking.id)).where(Booking.status == "no_show")) or 0
+    no_show_rate = round(no_shows / total * 100, 1) if total else 0.0
+
+    top_rows = (
+        await db.execute(
+            select(Business.name, func.count(Booking.id))
+            .join(Booking, Booking.business_id == Business.id)
+            .group_by(Business.id)
+            .order_by(desc(func.count(Booking.id)))
+            .limit(5)
+        )
+    ).all()
+    top_businesses = [{"name": n, "bookings": c} for n, c in top_rows]
+
+    return {
+        "daily_last_7_days": daily,
+        "no_show_rate_percent": no_show_rate,
+        "top_businesses": top_businesses,
+    }
+
+
+@router.get("/system-health")
+async def system_health(
+    _: User = Depends(get_current_super_admin),
+    db: AsyncSession = Depends(get_db),
+):
+    """Same signals as /health but always 200, so the admin widget renders the
+    status instead of an axios error on a 503."""
+    from app.services.scheduler import scheduler_health
+
+    db_ok = True
+    try:
+        await db.execute(select(User.id).limit(1))
+    except Exception:
+        db_ok = False
+    sched = scheduler_health()
+    return {"db": db_ok, "scheduler": sched, "healthy": db_ok and sched["healthy"]}
 
 
 # ── Drill-down + activity feed for the admin overview ────────────────────────

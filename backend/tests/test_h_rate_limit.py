@@ -28,9 +28,21 @@ def test_key_prefers_authenticated_user():
     assert key == "user:42"
 
 
-def test_key_uses_forwarded_for_when_anonymous():
+def test_key_uses_trusted_rightmost_forwarded_for_when_anonymous():
+    # The RIGHTMOST XFF entry is the IP the trusted edge proxy appended (the real
+    # client peer). The leftmost entries are client-supplied and spoofable, so the
+    # key must NOT be derived from them — otherwise an attacker rotates a fake first
+    # hop per request and bypasses every anonymous rate limit.
     key = rate_limit_key(_request({"x-forwarded-for": "9.9.9.9, 10.0.0.1"}, client_ip="172.16.0.1"))
-    assert key == "ip:9.9.9.9"
+    assert key == "ip:10.0.0.1"
+
+
+def test_key_ignores_spoofed_leftmost_forwarded_for():
+    # Two requests from the same real client (same rightmost hop) but different
+    # attacker-supplied leftmost hops must map to the SAME key.
+    k1 = rate_limit_key(_request({"x-forwarded-for": "1.1.1.1, 203.0.113.7"}))
+    k2 = rate_limit_key(_request({"x-forwarded-for": "2.2.2.2, 203.0.113.7"}))
+    assert k1 == k2 == "ip:203.0.113.7"
 
 
 def test_key_falls_back_to_client_ip():

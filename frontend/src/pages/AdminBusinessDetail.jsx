@@ -214,7 +214,7 @@ export default function AdminBusinessDetail() {
                     <td style={{ fontSize: "var(--text-sm)" }}>{b.booking_date ? dayjs(b.booking_date).format("DD.MM.YYYY") : "—"}</td>
                     <td style={{ fontSize: "var(--text-sm)" }}>{b.booking_time?.slice(0, 5) || "—"}</td>
                     <td>
-                      <span className={`badge ${BOOKING_BADGE[b.status] || ""}`}>{t(`status_${b.status}`)}</span>
+                      <span className={`badge ${BOOKING_BADGE[b.status] || ""}`}>{t(b.status) || b.status}</span>
                     </td>
                   </tr>
                 ))}

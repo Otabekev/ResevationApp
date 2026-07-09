@@ -25,9 +25,16 @@ def rate_limit_key(request: Request) -> str:
         except JWTError:
             pass
 
+    # Use the RIGHTMOST X-Forwarded-For entry — the IP the trusted edge proxy
+    # (Railway) appended, i.e. the real client peer. The leftmost entries are
+    # whatever the client sent and are fully spoofable, so keying off split(",")[0]
+    # let an attacker rotate a fake first hop per request and bypass every
+    # anonymous rate limit. Fall back to the socket peer when no XFF is present.
     xff = request.headers.get("x-forwarded-for")
     if xff:
-        return f"ip:{xff.split(',')[0].strip()}"
+        parts = [p.strip() for p in xff.split(",") if p.strip()]
+        if parts:
+            return f"ip:{parts[-1]}"
     return f"ip:{get_remote_address(request)}"
 
 

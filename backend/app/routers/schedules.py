@@ -121,7 +121,14 @@ async def _get_owned_business(business_id: int, user: User, db: AsyncSession) ->
 # ── Business working hours ────────────────────────────────────────────────────
 
 @router.get("/businesses/{business_id}/working-hours", response_model=list[WorkingHoursOut])
-async def get_business_hours(business_id: int, db: AsyncSession = Depends(get_db)):
+async def get_business_hours(
+    business_id: int,
+    user: User = Depends(get_current_business_owner),
+    db: AsyncSession = Depends(get_db),
+):
+    # Owner-only: these were unauthenticated, letting anyone enumerate any (even
+    # pending/suspended) business's schedule by iterating business_id.
+    await _get_owned_business(business_id, user, db)
     result = await db.execute(
         select(WorkingHours).where(
             and_(WorkingHours.business_id == business_id, WorkingHours.staff_id.is_(None))
@@ -162,8 +169,10 @@ async def set_business_hours(
 async def get_staff_hours(
     business_id: int,
     staff_id: int,
+    user: User = Depends(get_current_business_owner),
     db: AsyncSession = Depends(get_db),
 ):
+    await _get_owned_business(business_id, user, db)
     staff = await db.get(Staff, staff_id)
     if not staff or staff.business_id != business_id:
         raise HTTPException(status_code=404, detail="Staff not found")
@@ -223,7 +232,12 @@ async def clear_staff_hours(
 # ── Breaks ────────────────────────────────────────────────────────────────────
 
 @router.get("/businesses/{business_id}/breaks", response_model=list[BreakOut])
-async def get_breaks(business_id: int, db: AsyncSession = Depends(get_db)):
+async def get_breaks(
+    business_id: int,
+    user: User = Depends(get_current_business_owner),
+    db: AsyncSession = Depends(get_db),
+):
+    await _get_owned_business(business_id, user, db)
     result = await db.execute(
         select(BreakTime).where(
             and_(BreakTime.business_id == business_id, BreakTime.staff_id.is_(None))

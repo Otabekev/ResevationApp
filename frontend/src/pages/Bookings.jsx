@@ -185,7 +185,15 @@ export default function Bookings() {
       setToast({ message: t("booking_created"), variant: "success" });
       await load();
     } catch (err) {
-      setModalError(err.response?.data?.detail || t("error"));
+      const detail = err.response?.data?.detail || "";
+      // The suspended/blocked gate returns a fixed English detail — show the
+      // localized "paused" message instead. Other 409s (e.g. slot just taken)
+      // keep their own detail.
+      if (err.response?.status === 409 && detail.toLowerCase().includes("not accepting")) {
+        setModalError(t("business_paused_desc"));
+      } else {
+        setModalError(detail || t("error"));
+      }
     } finally {
       setSaving(false);
     }
