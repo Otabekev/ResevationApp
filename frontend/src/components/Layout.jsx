@@ -25,6 +25,8 @@ const NAV_ITEMS = [
 const ADMIN_NAV_ITEMS = [
   { path: "/", Icon: IconHome, key: "overview", mobile: true },
   { path: "/admin/businesses", Icon: IconShield, key: "businesses", mobile: true },
+  { path: "/admin/users", Icon: IconUsers, key: "users", mobile: true },
+  { path: "/admin/bookings", Icon: IconCalendar, key: "admin_bookings", mobile: true },
   { path: "/admin/broadcast", Icon: IconSend, key: "broadcast", mobile: true },
 ];
 

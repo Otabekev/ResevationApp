@@ -20,6 +20,8 @@ const Settings = lazy(() => import("./pages/Settings"));
 const AdminOverview = lazy(() => import("./pages/AdminOverview"));
 const AdminBusinesses = lazy(() => import("./pages/AdminBusinesses"));
 const AdminBusinessDetail = lazy(() => import("./pages/AdminBusinessDetail"));
+const AdminUsers = lazy(() => import("./pages/AdminUsers"));
+const AdminBookings = lazy(() => import("./pages/AdminBookings"));
 const AdminBroadcast = lazy(() => import("./pages/AdminBroadcast"));
 
 function PageFallback() {
@@ -106,6 +108,8 @@ export default function App() {
               <Route path="/" element={<AdminOverview />} />
               <Route path="/admin/businesses" element={<AdminBusinesses />} />
               <Route path="/admin/businesses/:id" element={<AdminBusinessDetail />} />
+              <Route path="/admin/users" element={<AdminUsers />} />
+              <Route path="/admin/bookings" element={<AdminBookings />} />
               <Route path="/admin/broadcast" element={<AdminBroadcast />} />
               <Route path="*" element={<Navigate to="/" replace />} />
             </Routes>

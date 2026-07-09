@@ -212,6 +212,14 @@ export const updateBusinessStatus = (bizId, status) =>
 export const getAdminBusinessDetail = (bizId) =>
   api.get(`/admin/businesses/${bizId}/detail`).then((r) => r.data);
 export const getAdminRecent = () => api.get("/admin/recent").then((r) => r.data);
+export const getAdminUsers = (params) => api.get("/admin/users", { params }).then((r) => r.data);
+export const setUserActive = (userId, is_active) =>
+  api.patch(`/admin/users/${userId}/active`, { is_active }).then((r) => r.data);
+export const getNeedsAttention = () => api.get("/admin/needs-attention").then((r) => r.data);
+export const searchAdminBookings = (params) =>
+  api.get("/admin/bookings/search", { params }).then((r) => r.data);
+export const getAdminInsights = () => api.get("/admin/insights").then((r) => r.data);
+export const getSystemHealth = () => api.get("/admin/system-health").then((r) => r.data);
 
 // ── Broadcasts (super-admin announcements) ─────────────────────────────────────
 export const getBroadcastAudienceCounts = () =>
