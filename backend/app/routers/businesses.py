@@ -1,19 +1,27 @@
 import hmac
 from datetime import datetime, timedelta, timezone
 
-from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi import APIRouter, Depends, HTTPException, Request, status
 from pydantic import BaseModel, Field
-from sqlalchemy import select
+from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app import location_share_store
 from app.config import settings
 from app.database import get_db
 from app.deps import get_current_business_owner, get_current_super_admin, get_current_user
+from app.limiter import limiter
 from app.models.business import Business, BusinessCategory
 from app.models.user import User
 
 router = APIRouter(prefix="/businesses", tags=["businesses"])
+
+# A genuine owner runs a handful of shops, never dozens. Cap non-terminated
+# businesses per account so one user can't flood the admin approval queue with
+# junk pending registrations (blocked = deactivated, so it doesn't count).
+_MAX_BUSINESSES_PER_OWNER = 5
+
+# A real owner runs a handful of shops, never d
 
 
 # ── Schemas ─────────────────────────────────────────────────────────────────
@@ -153,11 +161,27 @@ async def poll_location_share(nonce: str):
 # ── Business CRUD ────────────────────────────────────────────────────────────
 
 @router.post("", response_model=BusinessOut, status_code=status.HTTP_201_CREATED)
+@limiter.limit("5/hour")
 async def register_business(
+    request: Request,
     body: BusinessCreate,
     user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ):
+    # Cap how many businesses one account can own (excludes 'blocked', which is a
+    # terminated shop). Stops a single user flooding the approval queue; the
+    # 5/hour rate limit above stops a scripted burst even within the cap.
+    owned = await db.scalar(
+        select(func.count(Business.id)).where(
+            Business.owner_id == user.id, Business.status != "blocked"
+        )
+    )
+    if (owned or 0) >= _MAX_BUSINESSES_PER_OWNER:
+        raise HTTPException(
+            status_code=409,
+            detail=f"You've reached the maximum of {_MAX_BUSINESSES_PER_OWNER} businesses. Contact support to add more.",
+        )
+
     # Verify category exists
     cat = await db.get(BusinessCategory, body.category_id)
     if not cat:

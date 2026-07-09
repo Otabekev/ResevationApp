@@ -104,3 +104,29 @@ async def test_h3_admin_businesses_paginated_and_searchable(client, db):
 
     r3 = await client.get("/api/v1/admin/businesses", params={"q": "Shop23"}, headers=hdr)
     assert r3.json()["total"] == 1 and r3.json()["items"][0]["name"] == "Shop23"  # search hits any page
+
+
+# ── Registration cap: one owner can't flood the approval queue ────────────────
+
+_REG_BODY = {"category_id": None, "name": "Sixth", "city": "Pop",
+             "address": "Main St 1", "phone": "+998901234567"}
+
+
+async def test_registration_capped_per_owner(client, db):
+    owner = await f.create_user(db, role="business_owner", telegram_id=1)
+    cat = await f.create_category(db)
+    for i in range(5):
+        await f.create_business(db, owner_id=owner.id, category_id=cat.id, name=f"Biz{i}", status="pending")
+    r = await client.post("/api/v1/businesses", json={**_REG_BODY, "category_id": cat.id},
+                          headers=f.auth_header(owner.id))
+    assert r.status_code == 409, r.text  # 6th is rejected
+
+
+async def test_registration_ignores_blocked_toward_cap(client, db):
+    owner = await f.create_user(db, role="business_owner", telegram_id=2)
+    cat = await f.create_category(db)
+    for i in range(5):
+        await f.create_business(db, owner_id=owner.id, category_id=cat.id, name=f"Blk{i}", status="blocked")
+    r = await client.post("/api/v1/businesses", json={**_REG_BODY, "category_id": cat.id, "name": "Fresh"},
+                          headers=f.auth_header(owner.id))
+    assert r.status_code == 201, r.text  # blocked shops don't count toward the live cap
