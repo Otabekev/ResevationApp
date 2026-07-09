@@ -109,12 +109,13 @@ async def list_all_businesses(
     status_filter: str | None = Query(None, alias="status"),
     region: str | None = Query(None),
     district: str | None = Query(None),
+    q: str | None = Query(None, description="search by name / district / region"),
     page: int = Query(1, ge=1),
     page_size: int = Query(20, ge=1, le=100),
     _: User = Depends(get_current_super_admin),
     db: AsyncSession = Depends(get_db),
 ):
-    from sqlalchemy import and_
+    from sqlalchemy import and_, or_
 
     filters = []
     if status_filter:
@@ -123,14 +124,28 @@ async def list_all_businesses(
         filters.append(Business.region == region)
     if district:
         filters.append(Business.district == district)
+    # Server-side search so the admin can find ANY business, not just the current
+    # page (the old client-side filter only searched the 20 loaded rows).
+    if q and q.strip():
+        like = f"%{q.strip()}%"
+        filters.append(or_(
+            Business.name.ilike(like),
+            Business.district.ilike(like),
+            Business.region.ilike(like),
+        ))
 
-    stmt = select(Business)
-    if filters:
-        stmt = stmt.where(and_(*filters))
-    stmt = stmt.offset((page - 1) * page_size).limit(page_size)
+    where = and_(*filters) if filters else None
+    count_stmt = select(func.count(Business.id))
+    list_stmt = select(Business).order_by(Business.name)
+    if where is not None:
+        count_stmt = count_stmt.where(where)
+        list_stmt = list_stmt.where(where)
 
-    result = await db.execute(stmt)
-    return result.scalars().all()
+    total = await db.scalar(count_stmt) or 0
+    result = await db.execute(list_stmt.offset((page - 1) * page_size).limit(page_size))
+    # Return a total so the UI can paginate; the old bare-array response silently
+    # capped the admin at the first 20 rows per status bucket.
+    return {"items": result.scalars().all(), "total": total, "page": page, "page_size": page_size}
 
 
 @router.patch("/businesses/{business_id}/status")

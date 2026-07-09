@@ -81,3 +81,26 @@ async def test_c7_public_businesses_respects_limit(client, db):
                                 name=f"Biz{i}", status="active")
     r = await client.get("/api/v1/public/businesses", params={"limit": 2})
     assert r.status_code == 200 and len(r.json()) == 2, r.text
+
+
+# ── H3: admin business list is paginated + server-side searchable ─────────────
+
+async def test_h3_admin_businesses_paginated_and_searchable(client, db):
+    admin = await f.create_user(db, role="super_admin", telegram_id=999)
+    owner = await f.create_user(db, role="business_owner", telegram_id=1)
+    cat = await f.create_category(db)
+    for i in range(25):
+        await f.create_business(db, owner_id=owner.id, category_id=cat.id,
+                                name=f"Shop{i:02d}", status="active")
+    hdr = f.auth_header(admin.id)
+
+    r1 = await client.get("/api/v1/admin/businesses", params={"page": 1, "page_size": 20}, headers=hdr)
+    assert r1.status_code == 200, r1.text
+    body = r1.json()
+    assert body["total"] == 25 and len(body["items"]) == 20  # capped page, true total
+
+    r2 = await client.get("/api/v1/admin/businesses", params={"page": 2, "page_size": 20}, headers=hdr)
+    assert len(r2.json()["items"]) == 5  # the remainder is reachable
+
+    r3 = await client.get("/api/v1/admin/businesses", params={"q": "Shop23"}, headers=hdr)
+    assert r3.json()["total"] == 1 and r3.json()["items"][0]["name"] == "Shop23"  # search hits any page

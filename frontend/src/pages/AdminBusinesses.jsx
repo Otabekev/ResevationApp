@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useState } from "react";
 import { Link } from "react-router-dom";
 import { getAdminBusinesses, updateBusinessStatus } from "../api/client";
 import useStore from "../store/useStore";
@@ -20,17 +20,33 @@ const STATUS_BADGE = {
 export default function AdminBusinesses() {
   const { lang } = useStore();
   const t = useT(lang);
+  const PAGE_SIZE = 20;
   const [businesses, setBusinesses] = useState([]);
+  const [total, setTotal] = useState(0);
+  const [page, setPage] = useState(1);
   const [statusFilter, setStatusFilter] = useState("");
   const [search, setSearch] = useState("");
+  const [q, setQ] = useState("");
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(false);
   const [toast, setToast] = useState(null);
 
+  // Debounce the search box into `q`, jumping back to page 1 on a new query, so
+  // the server searches the WHOLE platform, not just the loaded page.
+  useEffect(() => {
+    const id = setTimeout(() => { setQ(search.trim()); setPage(1); }, 350);
+    return () => clearTimeout(id);
+  }, [search]);
+
   const load = async () => {
+    setLoading(true);
     try {
-      const params = statusFilter ? { status: statusFilter } : {};
-      setBusinesses(await getAdminBusinesses(params));
+      const params = { page, page_size: PAGE_SIZE };
+      if (statusFilter) params.status = statusFilter;
+      if (q) params.q = q;
+      const res = await getAdminBusinesses(params);
+      setBusinesses(res.items || []);
+      setTotal(res.total || 0);
       setError(false);
     } catch {
       setError(true);
@@ -39,7 +55,8 @@ export default function AdminBusinesses() {
     }
   };
 
-  useEffect(() => { load(); }, [statusFilter]);
+  // Server-side filter + paginate: reload on status / query / page change.
+  useEffect(() => { load(); }, [statusFilter, q, page]);
 
   const handleStatusChange = async (bizId, newStatus) => {
     try {
@@ -51,15 +68,9 @@ export default function AdminBusinesses() {
     }
   };
 
-  const filtered = useMemo(() => {
-    const q = search.trim().toLowerCase();
-    if (!q) return businesses;
-    return businesses.filter((b) =>
-      (b.name || "").toLowerCase().includes(q) ||
-      (b.district || "").toLowerCase().includes(q) ||
-      (b.region || "").toLowerCase().includes(q)
-    );
-  }, [businesses, search]);
+  const pageCount = Math.max(1, Math.ceil(total / PAGE_SIZE));
+  const rangeStart = total === 0 ? 0 : (page - 1) * PAGE_SIZE + 1;
+  const rangeEnd = Math.min(page * PAGE_SIZE, total);
 
   return (
     <div className="animate-in">
@@ -73,11 +84,11 @@ export default function AdminBusinesses() {
       <div className="card">
         <div className="row" style={{ justifyContent: "space-between", marginBottom: "var(--space-4)", flexWrap: "wrap", gap: 12 }}>
           <div className="segmented">
-            <button type="button" className={statusFilter === "" ? "on" : ""} onClick={() => setStatusFilter("")}>
+            <button type="button" className={statusFilter === "" ? "on" : ""} onClick={() => { setStatusFilter(""); setPage(1); }}>
               {t("all")}
             </button>
             {STATUSES.map((s) => (
-              <button key={s} type="button" className={statusFilter === s ? "on" : ""} onClick={() => setStatusFilter(s)}>
+              <button key={s} type="button" className={statusFilter === s ? "on" : ""} onClick={() => { setStatusFilter(s); setPage(1); }}>
                 {t(`status_${s}`)}
               </button>
             ))}
@@ -96,7 +107,7 @@ export default function AdminBusinesses() {
           <SkeletonList count={5} />
         ) : error ? (
           <EmptyState title={t("error")} subtitle={t("try_again")} />
-        ) : filtered.length === 0 ? (
+        ) : businesses.length === 0 ? (
           <EmptyState icon={<IconStore size={24} />} title={t("no_data")} />
         ) : (
           <div className="table-scroll">
@@ -111,7 +122,7 @@ export default function AdminBusinesses() {
                 </tr>
               </thead>
               <tbody>
-                {filtered.map((b) => (
+                {businesses.map((b) => (
                   <tr key={b.id}>
                     <td>
                       <Link to={`/admin/businesses/${b.id}`} style={{ fontWeight: 700, color: "inherit", textDecoration: "none" }}>
@@ -145,6 +156,22 @@ export default function AdminBusinesses() {
                 ))}
               </tbody>
             </table>
+          </div>
+        )}
+        {!loading && !error && total > 0 && (
+          <div className="row" style={{ justifyContent: "space-between", alignItems: "center", marginTop: "var(--space-4)", flexWrap: "wrap", gap: 8 }}>
+            <span style={{ fontSize: "var(--text-sm)", color: "var(--gray-500)" }}>
+              {rangeStart}–{rangeEnd} / {total}
+            </span>
+            <div className="row" style={{ gap: 6 }}>
+              <button type="button" className="btn btn-ghost btn-sm" disabled={page <= 1}
+                onClick={() => setPage((p) => Math.max(1, p - 1))} aria-label="Previous page">‹</button>
+              <span style={{ fontSize: "var(--text-sm)", color: "var(--gray-600)", minWidth: 56, textAlign: "center" }}>
+                {page} / {pageCount}
+              </span>
+              <button type="button" className="btn btn-ghost btn-sm" disabled={page >= pageCount}
+                onClick={() => setPage((p) => p + 1)} aria-label="Next page">›</button>
+            </div>
           </div>
         )}
       </div>
