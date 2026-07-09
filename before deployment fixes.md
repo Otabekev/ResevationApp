@@ -179,3 +179,27 @@ Double-booking prevention · emoji/`&`/`<` escaping (bot + backend) · phone nor
   authed preview so the design stays as-is.
 - **Ops (D11):** wire Sentry + document Neon backups (owner).
 - **Skip (D13):** the QN_Investor map is owner-owned; not touched.
+
+---
+
+## Round 2 — post-hardening tri-lens re-audit (engineer / designer / businessman)
+
+Fixed on `hardening` this round (all tested, suite 141 passed / 2 skipped):
+- [x] **H1** — rate-limit key uses the trusted (rightmost) X-Forwarded-For hop; the spoofable leftmost bypass is closed.
+- [x] **H2** — public-booking Telegram sends moved to a BackgroundTask; the pooled DB connection is freed before external HTTP (no pool starvation on a Telegram slowdown).
+- [x] **H3** — admin Businesses list paginated (prev/next + count) with server-side search; no longer capped at 20 / search-lies.
+- [x] **H4** — admin recent-bookings badges show real labels (`t(b.status)`), not raw `status_confirmed`.
+- [x] **M1** — reminders fire due-or-overdue (created_at-gated) so a long sweep gap can't skip them forever.
+- [x] **M2** — owner Dashboard shows an error + Refresh on a failed load (was: silent empty dashboard).
+- [x] **M3** — bot booking-entry attaches a main-menu keyboard on a backend blip (no buttonless dead-end).
+- [x] **M4** — suspended/blocked business shows a clear "paused" Dashboard screen + localized 409 (was: normal dashboard then raw English error).
+- [x] **L1** — batched availability honors staff-scoped breaks/blocks again (C1-refactor latent trap).
+- [x] **L3** — GET working-hours / staff-hours / breaks require the owner (were unauthenticated & enumerable).
+
+Held this round:
+- [ ] **L2** — reminder query loads full ORM rows every 15 min (micro-optimization). SKIPPED: low value, and I don't want to refactor the reminder critical path for a perf nit right before launch.
+- [ ] **Subscription/monetization (4 findings)** — DEFERRED by owner (implementing paid-businesses later): active/paid never expire, record-payment has no UI, Approve→active bypasses trial, no revenue/expiring view. Plus early-renewal-overwrites-coverage.
+- [ ] **Business registration uncapped/unthrottled** — owner wants to DISCUSS before fixing (cap per-owner + rate-limit).
+- [ ] **Refresh-token revocation** — HELD for confirmation: needs a `token_version` column + migration and touches the auth path on every request; recommend doing it as its own careful change.
+
+**What's verified SOLID (round 2):** multi-tenant isolation holds (no cross-business access), all SQL parameterized, bot locales + frontend i18n complete (bar the fixed admin badge), the shipped hardening fixes are correct, and the scary "broadcast pins a connection for 40 min" finding was a FALSE ALARM (SQLAlchemy releases on commit).
