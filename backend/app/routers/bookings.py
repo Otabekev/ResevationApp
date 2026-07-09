@@ -1,7 +1,7 @@
 import re
 from datetime import date, time
 
-from fastapi import APIRouter, Depends, HTTPException, Query, Request, status
+from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Query, Request, status
 from pydantic import BaseModel, Field, field_validator, model_validator
 from sqlalchemy import and_, select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -150,10 +150,13 @@ class StatusUpdateRequest(BaseModel):
 
 # ── Helpers ──────────────────────────────────────────────────────────────────
 
-async def _notify_business_side(
+async def _booking_alert_jobs(
     db: AsyncSession, booking: Booking, business: Business, svc_name_for: dict[str, str]
-) -> None:
-    """Alert the owner and (if linked to Telegram) the assigned staff member."""
+) -> list[dict]:
+    """Resolve the owner + assigned-staff 'new booking' alert recipients into send
+    jobs. Pure DB reads — the actual Telegram sends happen later in the background
+    task so no pooled connection is held across the external HTTP."""
+    jobs: list[dict] = []
     notified: set[int] = set()
 
     if business and business.owner_id:
@@ -162,16 +165,17 @@ async def _notify_business_side(
         ).scalar_one_or_none()
         if owner and owner.telegram_id:
             notified.add(owner.telegram_id)
-            await send_telegram_message(
-                owner.telegram_id,
-                new_booking_alert_message(
+            jobs.append({
+                "kind": "message",
+                "chat_id": owner.telegram_id,
+                "text": new_booking_alert_message(
                     lang=owner.language,
                     customer_name=booking.customer_name,
                     service_name=svc_name_for.get(owner.language, svc_name_for["uz"]),
                     date_str=str(booking.booking_date),
                     time_str=booking.start_time.strftime("%H:%M"),
                 ),
-            )
+            })
 
     if booking.staff_id:
         staff = await db.get(Staff, booking.staff_id)
@@ -180,16 +184,33 @@ async def _notify_business_side(
                 await db.execute(select(User).where(User.id == staff.user_id))
             ).scalar_one_or_none()
             if staff_user and staff_user.telegram_id and staff_user.telegram_id not in notified:
-                await send_telegram_message(
-                    staff_user.telegram_id,
-                    new_booking_alert_message(
+                jobs.append({
+                    "kind": "message",
+                    "chat_id": staff_user.telegram_id,
+                    "text": new_booking_alert_message(
                         lang=staff_user.language,
                         customer_name=booking.customer_name,
                         service_name=svc_name_for.get(staff_user.language, svc_name_for["uz"]),
                         date_str=str(booking.booking_date),
                         time_str=booking.start_time.strftime("%H:%M"),
                     ),
-                )
+                })
+    return jobs
+
+
+async def _deliver_notifications(jobs: list[dict]) -> None:
+    """Best-effort Telegram sends, run as a background task AFTER the response is
+    returned — so no request-scoped DB connection is held during external HTTP.
+    send_telegram_* already swallow + log their own errors; the guard here just
+    keeps one malformed job from aborting the rest."""
+    for j in jobs:
+        try:
+            if j["kind"] == "message":
+                await send_telegram_message(j["chat_id"], j["text"])
+            elif j["kind"] == "location":
+                await send_telegram_location(j["chat_id"], j["lat"], j["lng"])
+        except Exception:
+            continue
 
 
 def _svc_names(service: Service | None) -> dict[str, str]:
@@ -217,6 +238,7 @@ def _svc_names_all(services: list[Service]) -> dict[str, str]:
 async def create_public_booking(
     request: Request,
     body: BookingCreatePublic,
+    background: BackgroundTasks,
     db: AsyncSession = Depends(get_db),
     _: None = Depends(require_bot_secret),
 ):
@@ -274,7 +296,11 @@ async def create_public_booking(
     await db.commit()
     await db.refresh(booking)
 
-    # Send confirmation to customer
+    # Resolve every notification's data WHILE the request session is open, then
+    # hand the actual Telegram sends to a background task. The response returns —
+    # and the pooled DB connection is freed — before any slow external HTTP, so a
+    # Telegram latency spike during a booking burst can't pin connections and
+    # starve the pool (and the customer's booking never fails on a slow send).
     business = await db.get(Business, booking.business_id)
     staff = await db.get(Staff, booking.staff_id) if booking.staff_id else None
 
@@ -289,9 +315,10 @@ async def create_public_booking(
     staff_name = staff.name if staff else "—"
     total_price = sum(float(s.price) for s in ordered_services if s.price is not None)
 
-    await send_telegram_message(
-        customer.telegram_id,
-        booking_confirmed_message(
+    jobs: list[dict] = [{
+        "kind": "message",
+        "chat_id": customer.telegram_id,
+        "text": booking_confirmed_message(
             lang=lang,
             business_name=business.name,
             service_name=names.get(lang, names["uz"]),
@@ -302,15 +329,17 @@ async def create_public_booking(
             phone=business.phone,
             price=total_price or None,
         ),
-    )
-
-    # Send the business map pin alongside the confirmation so the customer can
-    # find the place (best-effort; only when the business has coordinates).
+    }]
+    # The business map pin, so the customer can find the place (only with coords).
     if business.latitude is not None and business.longitude is not None:
-        await send_telegram_location(customer.telegram_id, business.latitude, business.longitude)
+        jobs.append({
+            "kind": "location", "chat_id": customer.telegram_id,
+            "lat": business.latitude, "lng": business.longitude,
+        })
+    # Owner + assigned-staff "new booking" alerts.
+    jobs.extend(await _booking_alert_jobs(db, booking, business, names))
 
-    await _notify_business_side(db, booking, business, names)
-
+    background.add_task(_deliver_notifications, jobs)
     return booking
 
 

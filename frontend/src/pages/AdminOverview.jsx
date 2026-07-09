@@ -207,7 +207,7 @@ export default function AdminOverview() {
                       {b.business_name || `#${b.business_id}`} · {b.booking_date ? dayjs(b.booking_date).format("DD.MM") : ""} {b.booking_time?.slice(0, 5) || ""}
                     </div>
                   </div>
-                  <span className={`badge ${BOOKING_BADGE[b.status] || ""}`}>{t(`status_${b.status}`)}</span>
+                  <span className={`badge ${BOOKING_BADGE[b.status] || ""}`}>{t(b.status) || b.status}</span>
                 </li>
               ))}
             </ul>
