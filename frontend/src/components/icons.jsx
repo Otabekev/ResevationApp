@@ -228,6 +228,15 @@ export const IconGlobe = (p) => (
   </Icon>
 );
 
+export const IconImage = (p) => (
+  <Icon {...p}>
+    <rect x="3.5" y="4.5" width="17" height="15" rx="2.5" />
+    <circle cx="8.5" cy="9.5" r="1.6" />
+    <path d="m4 17 4.5-4.5a2 2 0 0 1 2.8 0L16 17" />
+    <path d="m13.5 14.5 2-2a2 2 0 0 1 2.8 0L20.5 15" />
+  </Icon>
+);
+
 export const IconChevronDown = (p) => (
   <Icon {...p}>
     <path d="m6 9.5 6 6 6-6" />

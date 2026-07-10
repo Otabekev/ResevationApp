@@ -21,6 +21,19 @@ _client = httpx.AsyncClient(
 )
 
 
+def absolute_media_url(url: str | None) -> str | None:
+    """Make a backend-relative media URL (e.g. '/api/v1/businesses/5/photo?v=1')
+    absolute so Telegram can fetch it by URL. The backend returns a relative photo
+    URL when WEBHOOK_BASE_URL isn't set; the bot always knows BACKEND_URL, so we
+    resolve it here. Already-absolute URLs pass through unchanged."""
+    if not url:
+        return None
+    if url.startswith("http://") or url.startswith("https://"):
+        return url
+    origin = BACKEND_URL.split("/api/v1")[0].rstrip("/")
+    return f"{origin}{url}"
+
+
 async def auth_user(telegram_id: int, name: str, username: str | None, language: str) -> dict:
     resp = await _client.post(
         f"{BACKEND_URL}/auth/bot",

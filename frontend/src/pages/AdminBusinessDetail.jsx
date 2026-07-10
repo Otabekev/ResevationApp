@@ -97,6 +97,13 @@ export default function AdminBusinessDetail() {
             <IconArrowLeft size={15} /> {t("businesses")}
           </Link>
           <div className="row" style={{ alignItems: "center", gap: 10, flexWrap: "wrap" }}>
+            {data.photo_url && (
+              <img
+                src={data.photo_url}
+                alt=""
+                style={{ width: 44, height: 44, borderRadius: "var(--radius-sm)", objectFit: "cover", border: "1px solid var(--border)", flexShrink: 0 }}
+              />
+            )}
             <h1 className="page-title" style={{ margin: 0 }}>{data.name}</h1>
             <span className={`badge ${STATUS_BADGE[data.status] || ""}`}>{t(`status_${data.status}`)}</span>
           </div>

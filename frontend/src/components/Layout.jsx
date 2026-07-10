@@ -82,7 +82,11 @@ function BusinessSwitcher() {
         aria-haspopup={many ? "menu" : undefined}
         aria-expanded={open}
       >
-        <span className="biz-dot">{initials(activeBusiness.name)}</span>
+        <span className="biz-dot" style={activeBusiness.photo_url ? { padding: 0, overflow: "hidden" } : undefined}>
+          {activeBusiness.photo_url
+            ? <img src={activeBusiness.photo_url} alt="" style={{ width: "100%", height: "100%", objectFit: "cover" }} />
+            : initials(activeBusiness.name)}
+        </span>
         <span className="biz-name">{activeBusiness.name}</span>
         {many && <IconChevronDown size={15} style={{ color: "var(--gray-400)", flexShrink: 0 }} />}
       </button>
@@ -96,7 +100,11 @@ function BusinessSwitcher() {
               className="menu-item"
               onClick={() => { setActiveBusiness(b); setOpen(false); }}
             >
-              <span className="biz-dot" style={{ width: 24, height: 24, fontSize: 11 }}>{initials(b.name)}</span>
+              <span className="biz-dot" style={{ width: 24, height: 24, fontSize: 11, ...(b.photo_url ? { padding: 0, overflow: "hidden" } : {}) }}>
+                {b.photo_url
+                  ? <img src={b.photo_url} alt="" style={{ width: "100%", height: "100%", objectFit: "cover" }} />
+                  : initials(b.name)}
+              </span>
               <span className="grow ellipsis">{b.name}</span>
               {b.id === activeBusiness.id && <IconCheck size={15} style={{ color: "var(--brand-600)" }} />}
             </button>

@@ -132,6 +132,7 @@ async def cmd_start(message: Message, state: FSMContext) -> None:
                     business_name=biz.get("name", "—"),
                     business_address=biz.get("address", ""),
                     business_has_location=biz.get("latitude") is not None and biz.get("longitude") is not None,
+                    business_photo_url=api_client.absolute_media_url(biz.get("photo_url")),
                     pending_action="book",
                 )
             except Exception:
@@ -359,11 +360,28 @@ async def set_language(callback: CallbackQuery, state: FSMContext) -> None:
         if data.get("business_has_location"):
             rows.append([InlineKeyboardButton(text=t("view_location", new_lang), callback_data=f"loc_{biz_id}")])
         rows.append([InlineKeyboardButton(text=t("back", new_lang), callback_data="main_menu")])
-        await callback.message.edit_text(
-            f"🏪 <b>{esc(data.get('business_name', ''))}</b>\n📍 {esc(data.get('business_address', ''))}",
-            parse_mode="HTML",
-            reply_markup=InlineKeyboardMarkup(inline_keyboard=rows),
-        )
+        kb = InlineKeyboardMarkup(inline_keyboard=rows)
+        card_text = f"🏪 <b>{esc(data.get('business_name', ''))}</b>\n📍 {esc(data.get('business_address', ''))}"
+        photo_url = data.get("business_photo_url")
+        # With a photo, show the storefront as a real photo card (image + caption +
+        # the same buttons). A text message can't be edited into a photo, so send a
+        # fresh photo message and drop the old text. If Telegram can't fetch the
+        # image, fall back to the plain text card so the flow never breaks.
+        sent_photo = False
+        if photo_url:
+            try:
+                await callback.message.answer_photo(
+                    photo=photo_url, caption=card_text, parse_mode="HTML", reply_markup=kb,
+                )
+                sent_photo = True
+                try:
+                    await callback.message.delete()
+                except Exception:
+                    pass
+            except Exception:
+                sent_photo = False
+        if not sent_photo:
+            await callback.message.edit_text(card_text, parse_mode="HTML", reply_markup=kb)
     elif data.get("pending_action") == "my_bookings_flow":
         await state.update_data(pending_action=None)
         # Refresh auth so the bookings fetch has a valid token — the one from

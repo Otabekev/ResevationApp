@@ -2,10 +2,11 @@ from datetime import datetime
 
 from sqlalchemy import (
     Boolean, DateTime, Enum, Float, ForeignKey,
-    Integer, String, Text, func,
+    Integer, LargeBinary, String, Text, func,
 )
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
+from app.config import settings
 from app.database import Base
 
 
@@ -79,6 +80,12 @@ class Business(Base):
     # Trial / subscription
     trial_ends_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
 
+    # One storefront photo. The bytes live in a separate `business_photos` table
+    # (loaded only when serving the image) so normal business queries stay lean;
+    # this timestamp on the row is both the "has a photo" flag and the cache-bust
+    # version baked into the public photo URL. NULL = no photo.
+    photo_updated_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
     updated_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now(), onupdate=func.now()
@@ -108,3 +115,40 @@ class Business(Base):
     # (suspended/blocked), never a hard delete, and the DB FK blocks raw deletes.
     bookings = relationship("Booking", back_populates="business")
     reviews = relationship("Review", back_populates="business")
+    # The photo row is owned by the business — drop it if the business is ever
+    # hard-deleted (DB also enforces this via ON DELETE CASCADE).
+    photo = relationship(
+        "BusinessPhoto", back_populates="business", uselist=False,
+        cascade="all, delete-orphan",
+    )
+
+    @property
+    def photo_url(self) -> str | None:
+        """Public URL of the storefront photo, or None if unset. Absolute when
+        WEBHOOK_BASE_URL is configured (so the Telegram bot can fetch it by URL);
+        relative otherwise (fine for the same-origin web app). The ?v= cache-bust
+        token is the photo's updated-at epoch, so a new upload busts CDN/browser
+        caches while an unchanged photo caches forever."""
+        if not self.photo_updated_at:
+            return None
+        base = (settings.webhook_base_url or "").rstrip("/")
+        version = int(self.photo_updated_at.timestamp())
+        return f"{base}/api/v1/businesses/{self.id}/photo?v={version}"
+
+
+class BusinessPhoto(Base):
+    """The raw bytes of a business's single storefront photo, kept out of the
+    hot `businesses` table so ordinary business reads never drag the blob. Always
+    stored as a server-recompressed JPEG (see the upload endpoint)."""
+    __tablename__ = "business_photos"
+
+    business_id: Mapped[int] = mapped_column(
+        ForeignKey("businesses.id", ondelete="CASCADE"), primary_key=True
+    )
+    data: Mapped[bytes] = mapped_column(LargeBinary, nullable=False)
+    content_type: Mapped[str] = mapped_column(String(50), nullable=False, default="image/jpeg")
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now(), onupdate=func.now()
+    )
+
+    business = relationship("Business", back_populates="photo")

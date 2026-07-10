@@ -133,6 +133,16 @@ export const getMyBusinesses = () => api.get("/businesses/mine").then((r) => r.d
 export const getBusiness = (id) => api.get(`/businesses/${id}`).then((r) => r.data);
 export const createBusiness = (data) => api.post("/businesses", data).then((r) => r.data);
 export const updateBusiness = (id, data) => api.patch(`/businesses/${id}`, data, { retryable: true }).then((r) => r.data);
+// Photo upload: `file` is already browser-shrunk (see utils/image.js). Multipart
+// via FormData — axios sets the multipart boundary Content-Type itself, and the
+// interceptor attaches the JWT. Longer timeout than JSON since uploads are slower.
+export const uploadBusinessPhoto = (id, file) => {
+  const fd = new FormData();
+  fd.append("file", file);
+  return api.put(`/businesses/${id}/photo`, fd, { timeout: 30000 }).then((r) => r.data);
+};
+export const deleteBusinessPhoto = (id) =>
+  api.delete(`/businesses/${id}/photo`).then((r) => r.data);
 
 // ── Services ──────────────────────────────────────────────────────────────────
 export const getServices = (bizId) => api.get(`/businesses/${bizId}/services/all`).then((r) => r.data);

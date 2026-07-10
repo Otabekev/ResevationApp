@@ -1,5 +1,5 @@
 from app.models.user import User
-from app.models.business import Business, BusinessCategory
+from app.models.business import Business, BusinessCategory, BusinessPhoto
 from app.models.service import Service
 from app.models.staff import Staff, StaffInvite, StaffService
 from app.models.schedule import WorkingHours, BreakTime, BlockedTime
@@ -12,6 +12,7 @@ __all__ = [
     "User",
     "Business",
     "BusinessCategory",
+    "BusinessPhoto",
     "Service",
     "Staff",
     "StaffInvite",
