@@ -556,6 +556,7 @@ async def get_business_detail(
         "district": business.district,
         "address": business.address,
         "phone": business.phone,
+        "photo_url": business.photo_url,
         "is_online_booking_enabled": business.is_online_booking_enabled,
         "trial_ends_at": business.trial_ends_at.isoformat() if business.trial_ends_at else None,
         "created_at": business.created_at.isoformat() if business.created_at else None,

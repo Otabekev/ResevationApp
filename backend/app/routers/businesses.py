@@ -1,7 +1,11 @@
 import hmac
+import io
 from datetime import datetime, timedelta, timezone
 
-from fastapi import APIRouter, Depends, HTTPException, Request, status
+from fastapi import (
+    APIRouter, Depends, File, HTTPException, Request, Response, UploadFile, status,
+)
+from PIL import Image, ImageOps
 from pydantic import BaseModel, Field
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -11,7 +15,7 @@ from app.config import settings
 from app.database import get_db
 from app.deps import get_current_business_owner, get_current_super_admin, get_current_user
 from app.limiter import limiter
-from app.models.business import Business, BusinessCategory
+from app.models.business import Business, BusinessCategory, BusinessPhoto
 from app.models.user import User
 
 router = APIRouter(prefix="/businesses", tags=["businesses"])
@@ -101,6 +105,7 @@ class BusinessOut(BaseModel):
     custom_message_uz: str | None
     custom_message_ru: str | None
     custom_message_en: str | None
+    photo_url: str | None = None
 
     model_config = {"from_attributes": True}
 
@@ -270,6 +275,7 @@ class PublicBusinessOut(BaseModel):
     custom_message_uz: str | None
     custom_message_ru: str | None
     custom_message_en: str | None
+    photo_url: str | None = None
 
     model_config = {"from_attributes": True}
 
@@ -280,3 +286,131 @@ async def get_public_profile(business_id: int, db: AsyncSession = Depends(get_db
     if not business or business.status not in ("active", "trial"):
         raise HTTPException(status_code=404, detail="Business not found")
     return business
+
+
+# ── Business photo (one storefront image) ────────────────────────────────────
+# Owners upload from the web dashboard; the image is shown on the web and — via a
+# public serve endpoint — sent as the Telegram business card. We accept ANY image
+# the owner picks and do the compression ourselves: the browser shrinks it before
+# upload (so it clears Vercel's ~4.5MB body limit), and the server re-decodes,
+# strips camera metadata, downscales, and re-encodes to a clean small JPEG. The
+# byte ceiling below is an anti-abuse backstop, not a limit a real photo hits.
+_PHOTO_MAX_UPLOAD_BYTES = 25 * 1024 * 1024  # 25MB hard backstop (abuse only)
+_PHOTO_MAX_DIM = 1024                        # longest edge after downscale
+_PHOTO_JPEG_QUALITY = 85
+
+# Guard against decompression bombs: refuse to allocate a pixel buffer bigger than
+# this even if the file is small on disk (a crafted PNG can be tiny yet enormous
+# decoded). 40 MP comfortably covers any phone/camera photo.
+Image.MAX_IMAGE_PIXELS = 40_000_000
+
+
+def _process_image(raw: bytes) -> bytes:
+    """Decode any supported image, normalize orientation, flatten transparency
+    onto white, downscale so the longest edge is <= _PHOTO_MAX_DIM, and re-encode
+    as an optimized JPEG. Returns the JPEG bytes. Raises 400 if the bytes aren't a
+    readable image (so a PDF/renamed file gets a clean error, not a 500)."""
+    try:
+        with Image.open(io.BytesIO(raw)) as img:
+            img.load()
+            img = ImageOps.exif_transpose(img)  # honor camera rotation
+            if img.mode in ("RGBA", "LA", "P"):
+                # Composite onto white so transparent areas don't turn black in JPEG.
+                img = img.convert("RGBA")
+                background = Image.new("RGB", img.size, (255, 255, 255))
+                background.paste(img, mask=img.split()[-1])
+                img = background
+            else:
+                img = img.convert("RGB")
+            img.thumbnail((_PHOTO_MAX_DIM, _PHOTO_MAX_DIM))  # keeps aspect ratio
+            out = io.BytesIO()
+            img.save(out, format="JPEG", quality=_PHOTO_JPEG_QUALITY, optimize=True)
+            return out.getvalue()
+    except HTTPException:
+        raise
+    except Exception:
+        raise HTTPException(
+            status_code=400,
+            detail="Could not read that image. Please try another photo.",
+        )
+
+
+async def _owned_business_or_403(business_id: int, user: User, db: AsyncSession) -> Business:
+    business = await db.get(Business, business_id)
+    if not business:
+        raise HTTPException(status_code=404, detail="Not found")
+    if business.owner_id != user.id and user.role != "super_admin":
+        raise HTTPException(status_code=403, detail="Forbidden")
+    return business
+
+
+@router.put("/{business_id}/photo", response_model=BusinessOut)
+async def upload_business_photo(
+    business_id: int,
+    file: UploadFile = File(...),
+    user: User = Depends(get_current_business_owner),
+    db: AsyncSession = Depends(get_db),
+):
+    """Replace the business's single storefront photo. Accepts any image; the
+    server recompresses it to a small JPEG before storing."""
+    business = await _owned_business_or_403(business_id, user, db)
+
+    # Read one byte past the ceiling so we can tell "at the limit" from "over it".
+    raw = await file.read(_PHOTO_MAX_UPLOAD_BYTES + 1)
+    if not raw:
+        raise HTTPException(status_code=400, detail="Empty file.")
+    if len(raw) > _PHOTO_MAX_UPLOAD_BYTES:
+        raise HTTPException(status_code=413, detail="Image is too large.")
+
+    processed = _process_image(raw)
+    now = datetime.now(timezone.utc)
+
+    photo = await db.get(BusinessPhoto, business_id)
+    if photo is None:
+        db.add(BusinessPhoto(
+            business_id=business_id, data=processed, content_type="image/jpeg", updated_at=now,
+        ))
+    else:
+        photo.data = processed
+        photo.content_type = "image/jpeg"
+        photo.updated_at = now
+        db.add(photo)
+    business.photo_updated_at = now
+    db.add(business)
+    await db.commit()
+    await db.refresh(business)
+    return business
+
+
+@router.delete("/{business_id}/photo", response_model=BusinessOut)
+async def delete_business_photo(
+    business_id: int,
+    user: User = Depends(get_current_business_owner),
+    db: AsyncSession = Depends(get_db),
+):
+    business = await _owned_business_or_403(business_id, user, db)
+    photo = await db.get(BusinessPhoto, business_id)
+    if photo is not None:
+        await db.delete(photo)
+    business.photo_updated_at = None
+    db.add(business)
+    await db.commit()
+    await db.refresh(business)
+    return business
+
+
+@router.get("/{business_id}/photo")
+async def get_business_photo(
+    business_id: int, request: Request, db: AsyncSession = Depends(get_db),
+):
+    """Public — serves the stored photo bytes. Cached hard/immutable because the
+    URL carries a ?v=<updated-at> token that changes on every new upload, so a
+    stale image is impossible while an unchanged one caches for a year."""
+    photo = await db.get(BusinessPhoto, business_id)
+    if photo is None:
+        raise HTTPException(status_code=404, detail="No photo")
+    etag = f'"{business_id}-{int(photo.updated_at.timestamp())}"'
+    cache_headers = {"Cache-Control": "public, max-age=31536000, immutable", "ETag": etag}
+    if request.headers.get("if-none-match") == etag:
+        return Response(status_code=304, headers=cache_headers)
+    return Response(content=photo.data, media_type=photo.content_type or "image/jpeg", headers=cache_headers)

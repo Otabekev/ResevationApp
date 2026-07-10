@@ -1,14 +1,15 @@
 import { useEffect, useState } from "react";
-import { getBusiness, updateBusiness } from "../api/client";
+import { getBusiness, updateBusiness, uploadBusinessPhoto, deleteBusinessPhoto } from "../api/client";
 import useStore from "../store/useStore";
 import { useT } from "../i18n";
 import { SkeletonCard } from "../components/Skeleton";
 import EmptyState from "../components/EmptyState";
 import Toast from "../components/Toast";
 import {
-  IconStore, IconLink, IconCopy, IconCheck, IconSettings, IconSend, IconTelegram,
+  IconStore, IconLink, IconCopy, IconCheck, IconSettings, IconSend, IconTelegram, IconImage,
 } from "../components/icons";
 import LocationPicker from "../components/LocationPicker";
+import { shrinkImage } from "../utils/image";
 
 const BOT_USERNAME = import.meta.env.VITE_TELEGRAM_BOT_USERNAME || "QulayNavbat_bot";
 
@@ -20,11 +21,14 @@ export default function Settings() {
   const [toast, setToast] = useState(null);
   const [copied, setCopied] = useState(false);
   const [error, setError] = useState(false);
+  const [photoUrl, setPhotoUrl] = useState(null);
+  const [photoBusy, setPhotoBusy] = useState(false);
 
   const load = () => {
     if (!activeBusiness) return;
     setError(false);
     getBusiness(activeBusiness.id).then((biz) => {
+        setPhotoUrl(biz.photo_url || null);
         setForm({
           name: biz.name || "",
           phone: biz.phone || "",
@@ -76,6 +80,38 @@ export default function Settings() {
       setToast({ message: err.response?.data?.detail || t("error"), variant: "error" });
     } finally {
       setSaving(false);
+    }
+  };
+
+  const handlePickPhoto = async (e) => {
+    const file = e.target.files?.[0];
+    e.target.value = ""; // reset so re-picking the SAME file still fires onChange
+    if (!file) return;
+    setPhotoBusy(true);
+    try {
+      const shrunk = await shrinkImage(file); // shrink in-browser before upload
+      const updated = await uploadBusinessPhoto(activeBusiness.id, shrunk);
+      setPhotoUrl(updated.photo_url || null);
+      setActiveBusiness(updated); // refresh the switcher avatar immediately
+      setToast({ message: t("saved"), variant: "success" });
+    } catch (err) {
+      setToast({ message: err.response?.data?.detail || t("photo_invalid"), variant: "error" });
+    } finally {
+      setPhotoBusy(false);
+    }
+  };
+
+  const handleRemovePhoto = async () => {
+    setPhotoBusy(true);
+    try {
+      const updated = await deleteBusinessPhoto(activeBusiness.id);
+      setPhotoUrl(null);
+      setActiveBusiness(updated);
+      setToast({ message: t("saved"), variant: "success" });
+    } catch {
+      setToast({ message: t("error"), variant: "error" });
+    } finally {
+      setPhotoBusy(false);
     }
   };
 
@@ -156,6 +192,41 @@ export default function Settings() {
           <a className="btn btn-secondary btn-sm" href={bookingLink} target="_blank" rel="noopener noreferrer">
             <IconTelegram size={15} /> {t("open_in_telegram")}
           </a>
+        </div>
+      </div>
+
+      {/* Business photo — what customers see on the Telegram booking card */}
+      <div className="card" style={{ marginBottom: "var(--space-4)" }}>
+        <div className="row" style={{ gap: 10, marginBottom: "var(--space-4)" }}>
+          <span className="stat-icon" aria-hidden><IconImage size={17} /></span>
+          <div>
+            <h3 className="card-title">{t("business_photo")}</h3>
+            <div className="card-sub">{t("business_photo_hint")}</div>
+          </div>
+        </div>
+        <div className="row" style={{ gap: 16, alignItems: "center", flexWrap: "wrap" }}>
+          <div
+            style={{
+              width: 96, height: 96, borderRadius: "var(--radius-md)", overflow: "hidden",
+              background: "var(--gray-100)", border: "1px solid var(--border)", flexShrink: 0,
+              display: "flex", alignItems: "center", justifyContent: "center",
+            }}
+          >
+            {photoUrl
+              ? <img src={photoUrl} alt={activeBusiness.name} style={{ width: "100%", height: "100%", objectFit: "cover" }} />
+              : <IconStore size={30} style={{ color: "var(--gray-400)" }} />}
+          </div>
+          <div className="row" style={{ gap: 8, flexWrap: "wrap" }}>
+            <label className="btn btn-secondary btn-sm" style={{ cursor: photoBusy ? "default" : "pointer" }}>
+              <IconImage size={15} /> {photoBusy ? t("uploading") : (photoUrl ? t("change_photo") : t("add_photo"))}
+              <input type="file" accept="image/*" hidden disabled={photoBusy} onChange={handlePickPhoto} />
+            </label>
+            {photoUrl && !photoBusy && (
+              <button type="button" className="btn btn-ghost btn-sm" onClick={handleRemovePhoto}>
+                {t("remove_photo")}
+              </button>
+            )}
+          </div>
         </div>
       </div>
 

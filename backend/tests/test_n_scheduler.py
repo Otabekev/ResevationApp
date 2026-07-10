@@ -11,8 +11,9 @@ Reminder scheduler (_send_reminders).
 from datetime import datetime, timedelta, timezone
 
 import pytest
+from sqlalchemy import select
 
-from app.models.booking import Booking, Customer
+from app.models.booking import Booking, Customer, Notification
 from app.services import scheduler
 from app.timeutils import PLATFORM_TZ
 from tests import factories as f
@@ -124,3 +125,43 @@ async def test_n4_reminder_carries_cancel_button(db, sessionmaker_, monkeypatch)
     kb = next((k.get("reply_markup") for k in calls if k.get("reply_markup")), None)
     assert kb is not None, "reminder should carry an inline keyboard"
     assert kb["inline_keyboard"][0][0]["callback_data"] == f"cancel_ask_{booking.id}"
+
+
+async def _add_notification(db, *, days_ago, tid):
+    n = Notification(
+        telegram_id=tid,
+        notification_type="reminder_24h_sent",
+        message="log line",
+        sent_at=datetime.now(timezone.utc) - timedelta(days=days_ago),
+    )
+    db.add(n)
+    await db.commit()
+    return n
+
+
+async def test_n5_purge_deletes_old_keeps_recent(db, sessionmaker_, monkeypatch):
+    """The daily cleanup prunes notification-LOG rows past the retention window
+    (default 90d) and keeps recent ones — pure storage reclaim."""
+    monkeypatch.setattr(scheduler, "AsyncSessionLocal", sessionmaker_)
+    old = await _add_notification(db, days_ago=200, tid=9001)
+    recent = await _add_notification(db, days_ago=10, tid=9002)
+    old_id, recent_id = old.id, recent.id  # capture before the purge deletes rows
+
+    await scheduler._purge_old_notifications()
+
+    remaining = set((await db.execute(select(Notification.id))).scalars().all())
+    assert old_id not in remaining, "log row past retention should be pruned"
+    assert recent_id in remaining, "recent log row must be kept"
+
+
+async def test_n6_retention_zero_keeps_everything(db, sessionmaker_, monkeypatch):
+    """Retention <= 0 disables pruning entirely (keep forever)."""
+    monkeypatch.setattr(scheduler, "AsyncSessionLocal", sessionmaker_)
+    monkeypatch.setattr(scheduler.settings, "notification_retention_days", 0)
+    old = await _add_notification(db, days_ago=999, tid=9003)
+    old_id = old.id
+
+    await scheduler._purge_old_notifications()
+
+    remaining = set((await db.execute(select(Notification.id))).scalars().all())
+    assert old_id in remaining, "pruning disabled → nothing deleted"

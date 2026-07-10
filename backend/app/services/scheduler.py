@@ -4,6 +4,9 @@ Runs every 15 minutes and sends:
   - 24-hour reminders
   - 1-hour reminders
 
+It also runs slower housekeeping jobs: trial expiry (6h), due-broadcast polling
+(60s), and a daily prune of the notifications send-LOG (see _purge_old_notifications).
+
 Hardening notes:
   - The candidate query is bounded to [today, today + 2 days] so the job never
     scans the whole future bookings table.
@@ -14,8 +17,9 @@ import logging
 from datetime import datetime, timedelta, timezone
 
 from apscheduler.schedulers.asyncio import AsyncIOScheduler
-from sqlalchemy import and_, select, update
+from sqlalchemy import and_, delete, select, update
 
+from app.config import settings
 from app.database import AsyncSessionLocal
 from app.models.booking import Booking, Customer, Notification
 from app.models.business import Business
@@ -252,6 +256,58 @@ async def _expire_trials_safe() -> None:
         logger.exception("Trial-expiry sweep failed")
 
 
+# The `notifications` table is a write-only send LOG — the reminder loop above is
+# its only writer, and nothing in the app ever reads it back (reminder dedup lives
+# on Booking.reminder_*_sent flags). Left alone it grows forever, so a daily job
+# prunes rows past the retention window. Pure storage reclaim: no user-, owner-,
+# or admin-facing feature depends on these rows.
+_NOTIFICATION_PURGE_BATCH = 5000
+
+
+async def _purge_old_notifications() -> None:
+    """Delete notification-log rows older than settings.notification_retention_days.
+
+    Deletes in bounded batches (each committed separately) so a first run on an
+    already-large table never holds a long lock or builds one huge transaction. A
+    non-positive retention disables pruning (keep everything)."""
+    retention_days = settings.notification_retention_days
+    if retention_days <= 0:
+        return
+    cutoff = datetime.now(timezone.utc) - timedelta(days=retention_days)
+    total = 0
+    async with AsyncSessionLocal() as db:
+        # Bounded loop with a runaway backstop: _BATCH * cap far exceeds any real
+        # daily backlog, so this can't spin forever if a driver misreports counts.
+        for _ in range(1000):
+            oldest = (
+                select(Notification.id)
+                .where(Notification.sent_at < cutoff)
+                .limit(_NOTIFICATION_PURGE_BATCH)
+            )
+            deleted = (
+                await db.execute(
+                    delete(Notification)
+                    .where(Notification.id.in_(oldest))
+                    .execution_options(synchronize_session=False)
+                )
+            ).rowcount or 0
+            await db.commit()
+            total += deleted
+            if deleted < _NOTIFICATION_PURGE_BATCH:
+                break
+    if total:
+        logger.info(
+            "Notification purge: deleted %s log row(s) older than %sd", total, retention_days
+        )
+
+
+async def _purge_old_notifications_safe() -> None:
+    try:
+        await _purge_old_notifications()
+    except Exception:
+        logger.exception("Notification purge failed")
+
+
 def start_scheduler() -> None:
     global last_reminder_run
     last_reminder_run = datetime.now(timezone.utc)  # grace before the first sweep
@@ -281,6 +337,18 @@ def start_scheduler() -> None:
         "interval",
         hours=6,
         id="trial_expiry",
+        coalesce=True,
+        max_instances=1,
+        misfire_grace_time=3600,
+    )
+    # Prune the notifications send-LOG daily so it doesn't grow forever. Non-
+    # critical + idempotent (a bounded batched DELETE); safe under a deploy overlap
+    # since re-deleting already-gone rows is a no-op.
+    scheduler.add_job(
+        _purge_old_notifications_safe,
+        "interval",
+        hours=24,
+        id="notification_purge",
         coalesce=True,
         max_instances=1,
         misfire_grace_time=3600,
