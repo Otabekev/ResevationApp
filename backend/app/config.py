@@ -44,6 +44,14 @@ class Settings(BaseSettings):
     platform_name: str = "Qulay Navbat"
     super_admin_telegram_ids: str = ""  # comma-separated
 
+    # How long to keep rows in the `notifications` send-LOG before the daily
+    # cleanup job prunes them. That table is write-only — nothing in the app ever
+    # reads it back (reminder dedup lives on Booking.reminder_*_sent), so this is
+    # pure storage reclaim with no functional effect. 0 or negative disables
+    # pruning (keep forever). Override via NOTIFICATION_RETENTION_DAYS — no code
+    # change needed.
+    notification_retention_days: int = 90
+
     # CORS
     allowed_origins: str = "http://localhost:5173"
 
