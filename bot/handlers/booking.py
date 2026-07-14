@@ -80,6 +80,26 @@ def paginate_buttons(
     return InlineKeyboardMarkup(inline_keyboard=rows)
 
 
+def _numbered_picker(items, cb_prefix, id_key, name_fn, lang, intro, back_cb, per_row=4):
+    """Pick from a list whose labels can be LONG (business names) without ever
+    clipping them. Telegram hard-truncates long button text, so instead we put the
+    FULL names in the message body — which wraps and is always readable — as a
+    numbered list, and use small numbered buttons (several per row) that map to
+    each item. Returns (text, keyboard)."""
+    lines = [intro, ""]
+    rows, row = [], []
+    for i, item in enumerate(items, 1):
+        lines.append(f"<b>{i}.</b> {esc(name_fn(item))}")
+        row.append(InlineKeyboardButton(text=str(i), callback_data=f"{cb_prefix}{item[id_key]}"))
+        if len(row) == per_row:
+            rows.append(row)
+            row = []
+    if row:
+        rows.append(row)
+    rows.append([InlineKeyboardButton(text=t("back", lang), callback_data=back_cb)])
+    return "\n".join(lines), InlineKeyboardMarkup(inline_keyboard=rows)
+
+
 # Asia/Tashkent is a fixed UTC+5 (no DST, ever). Compute "today" in business-local
 # time so the picker's Today/Tomorrow labels and the first bookable day match the
 # backend (which uses Asia/Tashkent). Plain date.today() uses the server's UTC and
@@ -111,6 +131,45 @@ def date_keyboard(lang: str) -> InlineKeyboardMarkup:
 
 async def _lang(state: FSMContext) -> str:
     return (await state.get_data()).get("lang", "uz")
+
+
+# ── Progressive "booking card" header ────────────────────────────────────────
+# Each step keeps the choices made so far visible (one per line) above its
+# question, so the flow reads as one growing card instead of a series of bare,
+# context-free prompts. `show` lists which choices THIS step should include — we
+# render only up to the current step so a stale value left in state by an
+# abandoned earlier attempt (state survives back-navigation) can never leak in.
+def _booking_header(data: dict, lang: str, show: tuple = ()) -> str:
+    lines = []
+    if "business" in show and data.get("business_name"):
+        lines.append(f"🏪 {esc(data['business_name'])}")
+    svc = data.get("service_name")
+    if "service" in show and svc and svc != "—":
+        lines.append(f"💈 {esc(svc)}")
+    if "staff" in show and data.get("staff_name"):
+        lines.append(f"👤 {esc(data['staff_name'])}")
+    if "date" in show and data.get("booking_date"):
+        try:
+            bd = date.fromisoformat(data["booking_date"]).strftime("%d.%m")
+        except (ValueError, TypeError):
+            bd = str(data["booking_date"])
+        line = f"📅 {bd}"
+        if "time" in show and data.get("start_time"):
+            line += f" · 🕐 {data['start_time']}"
+        lines.append(line)
+    # Neutral 📋 (not a barber-specific icon) — the platform serves every business
+    # type, and it matches the final booking-summary screen's header.
+    title = f"📋 <b>{t('booking_title', lang)}</b>"
+    if lines:
+        return title + "\n" + "\n".join(lines) + "\n──────────"
+    return title
+
+
+def _step(data: dict, lang: str, show: tuple, question_key: str) -> str:
+    """Progressive header + the step's question. Rendered as HTML (bold title +
+    HTML-escaped business/service/staff names), so every caller sends it with
+    parse_mode='HTML'."""
+    return f"{_booking_header(data, lang, show)}\n\n{t(question_key, lang)}"
 
 
 # ── Service-button label (protect the price) ─────────────────────────────────
@@ -234,7 +293,7 @@ async def _categories_view(lang: str):
         name = c.get(f"name_{lang}") or c.get("name_uz", "")
         return f"{icon} {name}".strip()
 
-    return t("choose_business_category", lang), paginate_buttons(categories, "cat_", "id", cat_label, lang)
+    return _step({}, lang, (), "choose_business_category"), paginate_buttons(categories, "cat_", "id", cat_label, lang)
 
 
 async def start_booking_from_message(message: Message, state: FSMContext) -> None:
@@ -245,7 +304,7 @@ async def start_booking_from_message(message: Message, state: FSMContext) -> Non
     if text is None:
         await message.answer(t("server_error", lang))
         return
-    await message.answer(text, reply_markup=kb)
+    await message.answer(text, parse_mode="HTML", reply_markup=kb)
 
 
 @router.callback_query(F.data == "book_start")
@@ -259,7 +318,7 @@ async def book_start(callback: CallbackQuery, state: FSMContext) -> None:
     if text is None:
         await callback.message.answer(t("server_error", lang))
         return
-    await callback.message.edit_text(text, reply_markup=kb)
+    await callback.message.edit_text(text, parse_mode="HTML", reply_markup=kb)
 
 
 # ── Category chosen → businesses ──────────────────────────────────────────────
@@ -289,8 +348,12 @@ async def category_chosen(callback: CallbackQuery, state: FSMContext) -> None:
         )
         return
 
-    kb = paginate_buttons(businesses, "biz_", "id", lambda b: b["name"], lang, back_cb="book_start")
-    await callback.message.edit_text(t("choose_business", lang), reply_markup=kb)
+    # Full names go in the message body (numbered, always readable) with small
+    # numbered buttons — long business names never get clipped the way a per-name
+    # button would. The header title sits above the "choose a business" prompt.
+    intro = _step({}, lang, (), "choose_business")
+    text, kb = _numbered_picker(businesses, "biz_", "id", lambda b: b["name"], lang, intro, back_cb="book_start")
+    await callback.message.edit_text(text, parse_mode="HTML", reply_markup=kb)
 
 
 # ── Business chosen → services ───────────────────────────────────────────────
@@ -372,7 +435,8 @@ async def business_chosen(callback: CallbackQuery, state: FSMContext) -> None:
         ]
         await state.update_data(ms_list=ms_list)
         await callback.message.edit_text(
-            t("choose_services_multi", lang),
+            _step(data, lang, ("business",), "choose_services_multi"),
+            parse_mode="HTML",
             reply_markup=_multiselect_kb(ms_list, [], lang, back_cb, business_id, has_location),
         )
         return
@@ -389,7 +453,7 @@ async def business_chosen(callback: CallbackQuery, state: FSMContext) -> None:
             len(kb.inline_keyboard) - 1,
             [InlineKeyboardButton(text=t("view_location", lang), callback_data=f"loc_{business_id}")],
         )
-    await callback.message.edit_text(t("choose_service", lang), reply_markup=kb)
+    await callback.message.edit_text(_step(data, lang, ("business",), "choose_service"), parse_mode="HTML", reply_markup=kb)
 
 
 # ── Service chosen → staff ───────────────────────────────────────────────────
@@ -433,7 +497,8 @@ async def _show_staff_step(callback: CallbackQuery, state: FSMContext, data: dic
     rows.append([InlineKeyboardButton(text=t("back", lang), callback_data=f"biz_{business_id}")])
 
     await callback.message.edit_text(
-        t("choose_staff", lang),
+        _step(data, lang, ("business", "service"), "choose_staff"),
+        parse_mode="HTML",
         reply_markup=InlineKeyboardMarkup(inline_keyboard=rows),
     )
 
@@ -543,7 +608,12 @@ async def staff_chosen(callback: CallbackQuery, state: FSMContext) -> None:
         staff_name = (data.get("staff_names") or {}).get(raw, f"#{raw}")
 
     await state.update_data(staff_id=staff_id, staff_name=staff_name)
-    await callback.message.edit_text(t("choose_date", lang), reply_markup=date_keyboard(lang))
+    data["staff_name"] = staff_name  # data was read before this write — reflect it in the header
+    await callback.message.edit_text(
+        _step(data, lang, ("business", "service", "staff"), "choose_date"),
+        parse_mode="HTML",
+        reply_markup=date_keyboard(lang),
+    )
 
 
 # ── Date chosen → time slots ─────────────────────────────────────────────────
@@ -595,7 +665,8 @@ async def date_chosen(callback: CallbackQuery, state: FSMContext) -> None:
     rows.append([InlineKeyboardButton(text=t("back", lang), callback_data="choose_staff_back")])
 
     await callback.message.edit_text(
-        t("choose_time", lang),
+        _step(data, lang, ("business", "service", "staff", "date"), "choose_time"),
+        parse_mode="HTML",
         reply_markup=InlineKeyboardMarkup(inline_keyboard=rows),
     )
 
@@ -608,8 +679,13 @@ async def time_chosen(callback: CallbackQuery, state: FSMContext) -> None:
     start_time = callback.data.split("_", 1)[1]
     await state.update_data(start_time=start_time)
 
-    lang = await _lang(state)
-    await callback.message.edit_text(t("enter_name", lang), reply_markup=_entry_nav_kb(lang))
+    data = await state.get_data()
+    lang = data.get("lang", "uz")
+    await callback.message.edit_text(
+        _step(data, lang, ("business", "service", "staff", "date", "time"), "enter_name"),
+        parse_mode="HTML",
+        reply_markup=_entry_nav_kb(lang),
+    )
     await state.set_state(BookingFSM.entering_name)
 
 
@@ -619,13 +695,18 @@ async def time_chosen(callback: CallbackQuery, state: FSMContext) -> None:
 async def name_entered(message: Message, state: FSMContext) -> None:
     """Take the name the customer types (not their Telegram display name, which
     is often a nickname) so the business sees a real name."""
-    lang = (await state.get_data()).get("lang", "uz")
+    data = await state.get_data()
+    lang = data.get("lang", "uz")
     name = (message.text or "").strip()
     if not (2 <= len(name) <= 100):
         await message.answer(t("invalid_name", lang), reply_markup=_entry_nav_kb(lang))
         return
     await state.update_data(customer_name=name)
-    await message.answer(t("enter_phone", lang), reply_markup=_entry_nav_kb(lang, with_back=True))
+    await message.answer(
+        _step(data, lang, ("business", "service", "staff", "date", "time"), "enter_phone"),
+        parse_mode="HTML",
+        reply_markup=_entry_nav_kb(lang, with_back=True),
+    )
     await state.set_state(BookingFSM.entering_phone)
 
 
@@ -633,8 +714,13 @@ async def name_entered(message: Message, state: FSMContext) -> None:
 async def entry_back_name(callback: CallbackQuery, state: FSMContext) -> None:
     """Customer tapped Back on the phone step → re-ask the name."""
     await callback.answer()
-    lang = await _lang(state)
-    await callback.message.edit_text(t("enter_name", lang), reply_markup=_entry_nav_kb(lang))
+    data = await state.get_data()
+    lang = data.get("lang", "uz")
+    await callback.message.edit_text(
+        _step(data, lang, ("business", "service", "staff", "date", "time"), "enter_name"),
+        parse_mode="HTML",
+        reply_markup=_entry_nav_kb(lang),
+    )
     await state.set_state(BookingFSM.entering_name)
 
 
