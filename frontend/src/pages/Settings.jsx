@@ -93,9 +93,23 @@ export default function Settings() {
       const updated = await uploadBusinessPhoto(activeBusiness.id, shrunk);
       setPhotoUrl(updated.photo_url || null);
       setActiveBusiness(updated); // refresh the switcher avatar immediately
-      setToast({ message: t("saved"), variant: "success" });
+      // Distinct from the form's generic "saved" toast so an upload result can
+      // never be confused with a text-fields save.
+      setToast({
+        message: updated.photo_url ? t("photo_saved") : t("photo_invalid"),
+        variant: updated.photo_url ? "success" : "error",
+      });
     } catch (err) {
-      setToast({ message: err.response?.data?.detail || t("photo_invalid"), variant: "error" });
+      // detail can be a string (our errors) or an array (validation errors) —
+      // only render strings, and surface the HTTP status so a failure report
+      // from an owner is self-diagnosing.
+      const detail = err.response?.data?.detail;
+      const message = typeof detail === "string"
+        ? detail
+        : err.response
+          ? `${t("photo_invalid")} (HTTP ${err.response.status})`
+          : t("photo_invalid");
+      setToast({ message, variant: "error" });
     } finally {
       setPhotoBusy(false);
     }

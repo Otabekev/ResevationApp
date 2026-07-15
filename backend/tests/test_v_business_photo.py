@@ -115,3 +115,26 @@ async def test_v7_conditional_get_returns_304(client, db):
     etag = first.headers["etag"]
     again = await client.get(f"{API}/businesses/{biz.id}/photo", headers={"If-None-Match": etag})
     assert again.status_code == 304
+
+
+async def test_v8_heic_iphone_photo_accepted(client, db):
+    """iPhones shoot HEIC by default — the server must decode it (pillow-heif)
+    and store the usual JPEG, or every iPhone owner's upload bounces."""
+    import pytest
+
+    pytest.importorskip("pillow_heif")
+    import pillow_heif
+
+    owner, biz = await _make_owned_business(db, tid=7008)
+    heif = pillow_heif.from_pillow(Image.new("RGB", (900, 700), (10, 120, 90)))
+    buf = io.BytesIO()
+    heif.save(buf, quality=80)
+
+    files = {"file": ("IMG_0001.HEIC", buf.getvalue(), "image/heic")}
+    resp = await client.put(f"{API}/businesses/{biz.id}/photo", files=files, headers=f.auth_header(owner.id))
+    assert resp.status_code == 200, resp.text
+    assert resp.json()["photo_url"]
+
+    served = await client.get(f"{API}/businesses/{biz.id}/photo")
+    assert served.status_code == 200
+    assert served.content[:2] == b"\xff\xd8", "HEIC should be stored re-encoded as JPEG"

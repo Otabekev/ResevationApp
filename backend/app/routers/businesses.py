@@ -1,11 +1,22 @@
 import hmac
 import io
+import logging
 from datetime import datetime, timedelta, timezone
 
 from fastapi import (
     APIRouter, Depends, File, HTTPException, Request, Response, UploadFile, status,
 )
 from PIL import Image, ImageOps
+
+# iPhones (and some Androids) shoot HEIC/HEIF by default; teach Pillow to decode
+# them so an owner's camera-roll photo never bounces. Guarded so a missing wheel
+# degrades to "HEIC unsupported" instead of killing the whole API at import.
+try:
+    from pillow_heif import register_heif_opener
+
+    register_heif_opener()
+except Exception:  # pragma: no cover - only hit if the dependency is absent
+    pass
 from pydantic import BaseModel, Field
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -19,6 +30,8 @@ from app.models.business import Business, BusinessCategory, BusinessPhoto
 from app.models.user import User
 
 router = APIRouter(prefix="/businesses", tags=["businesses"])
+
+logger = logging.getLogger("rezerv.businesses")
 
 # A genuine owner runs a handful of shops, never dozens. Cap non-terminated
 # businesses per account so one user can't flood the admin approval queue with
@@ -357,12 +370,25 @@ async def upload_business_photo(
 
     # Read one byte past the ceiling so we can tell "at the limit" from "over it".
     raw = await file.read(_PHOTO_MAX_UPLOAD_BYTES + 1)
+    # One log line per attempt — makes "did the upload ever reach us, and with
+    # what?" answerable from the server logs alone (was undiagnosable before).
+    logger.info(
+        "Photo upload: business=%s user=%s file=%r content_type=%r bytes=%s",
+        business_id, user.id, file.filename, file.content_type, len(raw or b""),
+    )
     if not raw:
         raise HTTPException(status_code=400, detail="Empty file.")
     if len(raw) > _PHOTO_MAX_UPLOAD_BYTES:
         raise HTTPException(status_code=413, detail="Image is too large.")
 
-    processed = _process_image(raw)
+    try:
+        processed = _process_image(raw)
+    except HTTPException:
+        logger.warning(
+            "Photo upload REJECTED (undecodable image): business=%s file=%r content_type=%r bytes=%s",
+            business_id, file.filename, file.content_type, len(raw),
+        )
+        raise
     now = datetime.now(timezone.utc)
 
     photo = await db.get(BusinessPhoto, business_id)
@@ -379,6 +405,9 @@ async def upload_business_photo(
     db.add(business)
     await db.commit()
     await db.refresh(business)
+    logger.info(
+        "Photo upload STORED: business=%s stored_bytes=%s", business_id, len(processed)
+    )
     return business
 
 
