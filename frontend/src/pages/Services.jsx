@@ -184,43 +184,49 @@ export default function Services() {
       ) : (
         <div className="stack stagger" style={{ gap: "var(--space-3)" }}>
           {services.map((svc) => (
+            // flexWrap + a generous flex-basis on the text block: on desktop this
+            // renders as one row (name+chips left, controls right); on a narrow
+            // phone the controls wrap onto their own line instead of crushing the
+            // name into one-character-per-line columns (bug6).
             <div
               key={svc.id}
               className="card card-tight row"
-              style={{ gap: "var(--space-3)", opacity: svc.is_active ? 1 : 0.6 }}
+              style={{ gap: "var(--space-3)", flexWrap: "wrap", opacity: svc.is_active ? 1 : 0.6 }}
             >
               <span className="stat-icon" style={{ flexShrink: 0 }} aria-hidden>
                 <IconScissors size={17} />
               </span>
-              <div className="grow" style={{ minWidth: 0 }}>
+              <div style={{ flex: "1 1 220px", minWidth: 0 }}>
                 <div style={{ fontWeight: 750, lineHeight: 1.35, wordBreak: "break-word" }}>
                   {svc[`name_${lang}`] || svc.name_uz}
                 </div>
                 <div className="row" style={{ gap: 6, marginTop: 4, flexWrap: "wrap" }}>
-                  <span className="chip">
+                  <span className="chip" style={{ whiteSpace: "nowrap" }}>
                     <IconClock size={12} /> {svc.duration_minutes} {t("min")}
                   </span>
-                  <span className="chip brand">{fmtPrice(svc.price, t)}</span>
+                  <span className="chip brand" style={{ whiteSpace: "nowrap" }}>{fmtPrice(svc.price, t)}</span>
                   {(svc.buffer_before_minutes > 0 || svc.buffer_after_minutes > 0) && (
-                    <span className="chip">
+                    <span className="chip" style={{ whiteSpace: "nowrap" }}>
                       +{svc.buffer_before_minutes + svc.buffer_after_minutes} {t("min_buffer")}
                     </span>
                   )}
-                  {svc.requires_confirmation && <span className="chip honey">{t("manual_confirm")}</span>}
+                  {svc.requires_confirmation && <span className="chip honey" style={{ whiteSpace: "nowrap" }}>{t("manual_confirm")}</span>}
                 </div>
               </div>
-              <label className="toggle" title={t("is_active")}>
-                <input
-                  type="checkbox"
-                  aria-label={t("is_active")}
-                  checked={svc.is_active}
-                  onChange={() => handleToggle(svc)}
-                />
-                <span className="toggle-slider"></span>
-              </label>
-              <button className="btn btn-secondary btn-sm" onClick={() => openEdit(svc)}>
-                <IconEdit size={15} /> {t("edit")}
-              </button>
+              <div className="row" style={{ gap: "var(--space-3)", marginLeft: "auto", flexShrink: 0, alignItems: "center" }}>
+                <label className="toggle" title={t("is_active")}>
+                  <input
+                    type="checkbox"
+                    aria-label={t("is_active")}
+                    checked={svc.is_active}
+                    onChange={() => handleToggle(svc)}
+                  />
+                  <span className="toggle-slider"></span>
+                </label>
+                <button className="btn btn-secondary btn-sm" onClick={() => openEdit(svc)}>
+                  <IconEdit size={15} /> {t("edit")}
+                </button>
+              </div>
             </div>
           ))}
         </div>

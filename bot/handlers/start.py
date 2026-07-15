@@ -421,11 +421,10 @@ async def set_language(callback: CallbackQuery, state: FSMContext) -> None:
 async def back_to_main(callback: CallbackQuery, state: FSMContext) -> None:
     data = await state.get_data()
     lang = data.get("lang", "uz")
-    await callback.message.edit_text(
-        t("start", lang),
-        parse_mode="HTML",
-        reply_markup=main_menu_keyboard(lang),
-    )
+    # _render_step handles the photo-card case: a storefront photo message can't
+    # be edit_text'd, so Back from one replaces it with a fresh menu message.
+    from handlers.booking import _render_step
+    await _render_step(callback.message, t("start", lang), main_menu_keyboard(lang))
     await callback.answer()
 
 
