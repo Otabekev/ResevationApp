@@ -172,6 +172,46 @@ def _step(data: dict, lang: str, show: tuple, question_key: str) -> str:
     return f"{_booking_header(data, lang, show)}\n\n{t(question_key, lang)}"
 
 
+async def _render_step(message, text: str, kb=None) -> None:
+    """Show a flow step: edit the current message in place when possible. When
+    the current message is a PHOTO card (business storefront), Telegram forbids
+    edit_text — so send a fresh message and drop the photo card instead. Every
+    step must render through this, or the first tap after a photo card dies."""
+    try:
+        await message.edit_text(text, parse_mode="HTML", reply_markup=kb)
+        return
+    except Exception:
+        pass
+    try:
+        await message.answer(text, parse_mode="HTML", reply_markup=kb)
+        try:
+            await message.delete()
+        except Exception:
+            pass
+    except Exception:
+        pass
+
+
+async def _render_business_card(message, photo_url: str | None, text: str, kb) -> None:
+    """The business step, as a storefront PHOTO card (image + caption + the
+    step's buttons) when the business has a photo; plain text card otherwise.
+    Photo failures (URL unreachable, Telegram hiccup) fall back to text so the
+    booking flow never breaks over a picture."""
+    if photo_url:
+        try:
+            await message.answer_photo(
+                photo=photo_url, caption=text, parse_mode="HTML", reply_markup=kb
+            )
+            try:
+                await message.delete()
+            except Exception:
+                pass
+            return
+        except Exception:
+            pass
+    await _render_step(message, text, kb)
+
+
 # ── Service-button label (protect the price) ─────────────────────────────────
 # Telegram renders an inline button on ONE line and ellipsizes from the RIGHT to
 # the button's pixel width (~20-34 visible chars on a mid-range Android). The
@@ -312,13 +352,13 @@ async def book_start(callback: CallbackQuery, state: FSMContext) -> None:
     await callback.answer()  # clear the Telegram spinner up front so the button never looks frozen
     lang = await _lang(state)
     if not await _booking_open(callback.from_user.id):
-        await callback.message.edit_text(t("prelaunch_wait", lang))
+        await _render_step(callback.message, t("prelaunch_wait", lang))
         return
     text, kb = await _categories_view(lang)
     if text is None:
         await callback.message.answer(t("server_error", lang))
         return
-    await callback.message.edit_text(text, parse_mode="HTML", reply_markup=kb)
+    await _render_step(callback.message, text, kb)
 
 
 # ── Category chosen → businesses ──────────────────────────────────────────────
@@ -340,9 +380,10 @@ async def category_chosen(callback: CallbackQuery, state: FSMContext) -> None:
         return
 
     if not businesses:
-        await callback.message.edit_text(
+        await _render_step(
+            callback.message,
             t("no_businesses_found", lang),
-            reply_markup=InlineKeyboardMarkup(inline_keyboard=[
+            InlineKeyboardMarkup(inline_keyboard=[
                 [InlineKeyboardButton(text=t("back", lang), callback_data="book_start")]
             ]),
         )
@@ -353,7 +394,7 @@ async def category_chosen(callback: CallbackQuery, state: FSMContext) -> None:
     # button would. The header title sits above the "choose a business" prompt.
     intro = _step({}, lang, (), "choose_business")
     text, kb = _numbered_picker(businesses, "biz_", "id", lambda b: b["name"], lang, intro, back_cb="book_start")
-    await callback.message.edit_text(text, parse_mode="HTML", reply_markup=kb)
+    await _render_step(callback.message, text, kb)
 
 
 # ── Business chosen → services ───────────────────────────────────────────────
@@ -365,7 +406,7 @@ async def business_chosen(callback: CallbackQuery, state: FSMContext) -> None:
     # Backstop gate — covers any path that reaches a concrete business (incl. the
     # deep-link card) even if an entry point above is ever missed. No-op after launch.
     if not await _booking_open(callback.from_user.id):
-        await callback.message.edit_text(t("prelaunch_wait", lang))
+        await _render_step(callback.message, t("prelaunch_wait", lang))
         return
     try:
         business_id = int(callback.data.split("_", 1)[1])
@@ -388,6 +429,9 @@ async def business_chosen(callback: CallbackQuery, state: FSMContext) -> None:
     # draft carried over from a previously-viewed business.
     has_location = biz.get("latitude") is not None and biz.get("longitude") is not None
     allow_multi = bool(biz.get("allow_multi_service"))
+    # Storefront photo — shown as a photo card on this step for EVERY path a
+    # customer takes (menu browse included, not just the deep link).
+    photo_url = api_client.absolute_media_url(biz.get("photo_url"))
     services_meta = {
         str(s["id"]): {
             "name": s.get(f"name_{lang}") or s.get("name_uz", ""),
@@ -410,9 +454,10 @@ async def business_chosen(callback: CallbackQuery, state: FSMContext) -> None:
     )
 
     if not services:
-        await callback.message.edit_text(
+        await _render_step(
+            callback.message,
             t("no_businesses_found", lang),
-            reply_markup=InlineKeyboardMarkup(inline_keyboard=[
+            InlineKeyboardMarkup(inline_keyboard=[
                 [InlineKeyboardButton(text=t("back", lang), callback_data="book_start")]
             ]),
         )
@@ -434,10 +479,11 @@ async def business_chosen(callback: CallbackQuery, state: FSMContext) -> None:
             for s in services
         ]
         await state.update_data(ms_list=ms_list)
-        await callback.message.edit_text(
+        await _render_business_card(
+            callback.message,
+            photo_url,
             _step(data, lang, ("business",), "choose_services_multi"),
-            parse_mode="HTML",
-            reply_markup=_multiselect_kb(ms_list, [], lang, back_cb, business_id, has_location),
+            _multiselect_kb(ms_list, [], lang, back_cb, business_id, has_location),
         )
         return
 
@@ -453,7 +499,9 @@ async def business_chosen(callback: CallbackQuery, state: FSMContext) -> None:
             len(kb.inline_keyboard) - 1,
             [InlineKeyboardButton(text=t("view_location", lang), callback_data=f"loc_{business_id}")],
         )
-    await callback.message.edit_text(_step(data, lang, ("business",), "choose_service"), parse_mode="HTML", reply_markup=kb)
+    await _render_business_card(
+        callback.message, photo_url, _step(data, lang, ("business",), "choose_service"), kb
+    )
 
 
 # ── Service chosen → staff ───────────────────────────────────────────────────
@@ -496,10 +544,10 @@ async def _show_staff_step(callback: CallbackQuery, state: FSMContext, data: dic
         rows.append([InlineKeyboardButton(text=s["name"], callback_data=f"staff_{s['id']}")])
     rows.append([InlineKeyboardButton(text=t("back", lang), callback_data=f"biz_{business_id}")])
 
-    await callback.message.edit_text(
+    await _render_step(
+        callback.message,
         _step(data, lang, ("business", "service"), "choose_staff"),
-        parse_mode="HTML",
-        reply_markup=InlineKeyboardMarkup(inline_keyboard=rows),
+        InlineKeyboardMarkup(inline_keyboard=rows),
     )
 
 
@@ -609,10 +657,10 @@ async def staff_chosen(callback: CallbackQuery, state: FSMContext) -> None:
 
     await state.update_data(staff_id=staff_id, staff_name=staff_name)
     data["staff_name"] = staff_name  # data was read before this write — reflect it in the header
-    await callback.message.edit_text(
+    await _render_step(
+        callback.message,
         _step(data, lang, ("business", "service", "staff"), "choose_date"),
-        parse_mode="HTML",
-        reply_markup=date_keyboard(lang),
+        date_keyboard(lang),
     )
 
 
@@ -642,9 +690,10 @@ async def date_chosen(callback: CallbackQuery, state: FSMContext) -> None:
         return
 
     if not slots:
-        await callback.message.edit_text(
+        await _render_step(
+            callback.message,
             t("no_slots", lang),
-            reply_markup=InlineKeyboardMarkup(inline_keyboard=[
+            InlineKeyboardMarkup(inline_keyboard=[
                 [InlineKeyboardButton(text=t("back", lang), callback_data="choose_staff_back")]
             ]),
         )
@@ -664,10 +713,10 @@ async def date_chosen(callback: CallbackQuery, state: FSMContext) -> None:
         rows.append(row)
     rows.append([InlineKeyboardButton(text=t("back", lang), callback_data="choose_staff_back")])
 
-    await callback.message.edit_text(
+    await _render_step(
+        callback.message,
         _step(data, lang, ("business", "service", "staff", "date"), "choose_time"),
-        parse_mode="HTML",
-        reply_markup=InlineKeyboardMarkup(inline_keyboard=rows),
+        InlineKeyboardMarkup(inline_keyboard=rows),
     )
 
 
@@ -681,10 +730,10 @@ async def time_chosen(callback: CallbackQuery, state: FSMContext) -> None:
 
     data = await state.get_data()
     lang = data.get("lang", "uz")
-    await callback.message.edit_text(
+    await _render_step(
+        callback.message,
         _step(data, lang, ("business", "service", "staff", "date", "time"), "enter_name"),
-        parse_mode="HTML",
-        reply_markup=_entry_nav_kb(lang),
+        _entry_nav_kb(lang),
     )
     await state.set_state(BookingFSM.entering_name)
 
@@ -716,10 +765,10 @@ async def entry_back_name(callback: CallbackQuery, state: FSMContext) -> None:
     await callback.answer()
     data = await state.get_data()
     lang = data.get("lang", "uz")
-    await callback.message.edit_text(
+    await _render_step(
+        callback.message,
         _step(data, lang, ("business", "service", "staff", "date", "time"), "enter_name"),
-        parse_mode="HTML",
-        reply_markup=_entry_nav_kb(lang),
+        _entry_nav_kb(lang),
     )
     await state.set_state(BookingFSM.entering_name)
 
@@ -737,9 +786,7 @@ async def book_abort(callback: CallbackQuery, state: FSMContext) -> None:
         service_ids=None, selected_services=[], customer_name=None,
     )
     from handlers.start import main_menu_keyboard
-    await callback.message.edit_text(
-        t("start", lang), parse_mode="HTML", reply_markup=main_menu_keyboard(lang),
-    )
+    await _render_step(callback.message, t("start", lang), main_menu_keyboard(lang))
 
 
 # ── Phone entered → show summary ─────────────────────────────────────────────
