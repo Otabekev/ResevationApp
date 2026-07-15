@@ -192,8 +192,8 @@ export default function Services() {
               <span className="stat-icon" style={{ flexShrink: 0 }} aria-hidden>
                 <IconScissors size={17} />
               </span>
-              <div className="grow">
-                <div style={{ fontWeight: 750 }} className="ellipsis">
+              <div className="grow" style={{ minWidth: 0 }}>
+                <div style={{ fontWeight: 750, lineHeight: 1.35, wordBreak: "break-word" }}>
                   {svc[`name_${lang}`] || svc.name_uz}
                 </div>
                 <div className="row" style={{ gap: 6, marginTop: 4, flexWrap: "wrap" }}>

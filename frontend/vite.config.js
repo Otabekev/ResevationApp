@@ -36,6 +36,9 @@ export default defineConfig({
     }),
   ],
   server: {
+    // The dev launcher assigns a free port via PORT when 5173 is taken
+    // (e.g. by another session's dev server); 5173 stays the manual default.
+    port: Number(process.env.PORT) || 5173,
     proxy: {
       "/api": {
         target: "http://localhost:8000",
