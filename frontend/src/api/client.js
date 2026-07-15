@@ -133,13 +133,34 @@ export const getMyBusinesses = () => api.get("/businesses/mine").then((r) => r.d
 export const getBusiness = (id) => api.get(`/businesses/${id}`).then((r) => r.data);
 export const createBusiness = (data) => api.post("/businesses", data).then((r) => r.data);
 export const updateBusiness = (id, data) => api.patch(`/businesses/${id}`, data, { retryable: true }).then((r) => r.data);
-// Photo upload: `file` is already browser-shrunk (see utils/image.js). Multipart
-// via FormData — axios sets the multipart boundary Content-Type itself, and the
-// interceptor attaches the JWT. Longer timeout than JSON since uploads are slower.
-export const uploadBusinessPhoto = (id, file) => {
+
+// Photo uploads go STRAIGHT to the backend origin in production, not through the
+// Vercel `/api/*` proxy: Vercel's edge rejects request bodies over ~4.5MB, so a
+// full-size phone photo (when the browser couldn't pre-shrink it) died at the
+// edge and never even reached the backend — invisible in server logs. Direct
+// upload lifts that to the backend's own 25MB cap; CORS already allows PUT from
+// the dashboard origin. An absolute URL on the shared axios instance keeps the
+// auth/refresh interceptors. Relative (dev proxy) when developing locally.
+const DIRECT_API_BASE = import.meta.env.PROD
+  ? (import.meta.env.VITE_DIRECT_API_BASE_URL ||
+     "https://resevationapp-backend-production.up.railway.app/api/v1")
+  : "";
+
+export const uploadBusinessPhoto = async (id, file) => {
   const fd = new FormData();
   fd.append("file", file);
-  return api.put(`/businesses/${id}/photo`, fd, { timeout: 30000 }).then((r) => r.data);
+  const opts = { timeout: 60000 }; // big originals on slow mobile networks
+  try {
+    return (await api.put(`${DIRECT_API_BASE}/businesses/${id}/photo`, fd, opts)).data;
+  } catch (err) {
+    // Network-level failure on the direct route (blocked CORS/DNS/firewall) —
+    // fall back once through the same-origin proxy, which works for the common
+    // already-shrunk (<4.5MB) case. Real HTTP errors (4xx/5xx) surface as-is.
+    if (!err.response && DIRECT_API_BASE) {
+      return (await api.put(`/businesses/${id}/photo`, fd, opts)).data;
+    }
+    throw err;
+  }
 };
 export const deleteBusinessPhoto = (id) =>
   api.delete(`/businesses/${id}/photo`).then((r) => r.data);
