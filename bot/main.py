@@ -9,6 +9,7 @@ from aiogram.types import BotCommand, ErrorEvent
 
 from config import BOT_TOKEN, REDIS_URL
 from handlers import booking, my_bookings, start
+from i18n import t
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
@@ -55,11 +56,26 @@ async def main() -> None:
             except Exception:
                 pass
 
-    # Menu button (left of the input field) shows a clear, localized command so
-    # users who don't know to type /start still have an obvious one-tap way in.
+    # Menu button (left of the input field) shows clear, one-tap commands so
+    # users who don't know to type /start still have an obvious way in — and a
+    # business owner who found the bot via a flyer sees "add your business".
     await bot.set_my_commands([
         BotCommand(command="start", description="📅 Bron qilish / Boshlash"),
+        BotCommand(command="biznes", description="🏪 Biznesingizni bepul qo'shish"),
     ])
+
+    # Ambient "what is this + how to use" text shown the moment a user opens the
+    # bot (the pre-Start screen) and on its profile — this is the always-there
+    # background instruction. Set the default (uz + fallback) plus ru/en. Wrapped
+    # so a transient Telegram API hiccup on boot never stops the bot polling.
+    try:
+        await bot.set_my_description(t("bot_description", "uz"))
+        await bot.set_my_short_description(t("bot_short_description", "uz"))
+        for lc in ("ru", "en"):
+            await bot.set_my_description(t("bot_description", lc), language_code=lc)
+            await bot.set_my_short_description(t("bot_short_description", lc), language_code=lc)
+    except Exception:
+        logger.warning("Could not set bot description/commands metadata", exc_info=True)
 
     logger.info("Bot starting...")
     # drop_pending_updates: on every restart (each deploy restarts the bot),

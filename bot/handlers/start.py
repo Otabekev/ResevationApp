@@ -2,7 +2,7 @@ import asyncio
 import logging
 
 from aiogram import F, Router
-from aiogram.filters import CommandStart
+from aiogram.filters import Command, CommandStart
 from aiogram.fsm.context import FSMContext
 from aiogram.types import (
     CallbackQuery,
@@ -71,14 +71,18 @@ def language_keyboard() -> InlineKeyboardMarkup:
 BOOK_CTA_TEXT = "📅 Bron qilish"
 BOOKINGS_CTA_TEXT = "📋 Mening bronlarim"
 HELP_CTA_TEXT = "ℹ️ Yo'riqnoma"
+# Business-owner CTA: flyers/Instagram posts reach shop owners too, so a docked
+# "add your business (free)" button is always in front of them — one tap to the
+# contact pitch. Constant Uzbek like the others so it reads the same pre-language.
+BIZ_CTA_TEXT = "🏪 Biznesingizni qo'shish"
 
 
 def booking_cta_keyboard() -> ReplyKeyboardMarkup:
     return ReplyKeyboardMarkup(
         keyboard=[
             [KeyboardButton(text=BOOK_CTA_TEXT)],
-            [KeyboardButton(text=BOOKINGS_CTA_TEXT)],
-            [KeyboardButton(text=HELP_CTA_TEXT)],
+            [KeyboardButton(text=BOOKINGS_CTA_TEXT), KeyboardButton(text=HELP_CTA_TEXT)],
+            [KeyboardButton(text=BIZ_CTA_TEXT)],
         ],
         resize_keyboard=True,
         is_persistent=True,
@@ -285,6 +289,26 @@ async def on_help_cta(message: Message, state: FSMContext) -> None:
     lang = (await state.get_data()).get("lang", "uz")
     await state.update_data(pending_action="help_flow")
     await message.answer(t("choose_language", lang), reply_markup=language_keyboard())
+
+
+async def _show_business_pitch(message: Message, state: FSMContext) -> None:
+    """The free-registration sales pitch + contact number. Shown directly (no
+    language detour — it's a one-shot info message) in the user's current
+    language; the docked keyboard stays put underneath."""
+    lang = (await state.get_data()).get("lang", "uz")
+    await message.answer(t("register_business_info", lang))
+
+
+@router.message(F.text == BIZ_CTA_TEXT)
+async def on_business_cta(message: Message, state: FSMContext) -> None:
+    """Docked '🏪 Biznesingizni qo'shish' button → the registration pitch."""
+    await _show_business_pitch(message, state)
+
+
+@router.message(Command("biznes"))
+async def cmd_biznes(message: Message, state: FSMContext) -> None:
+    """/biznes command (also in the bot menu) → the registration pitch."""
+    await _show_business_pitch(message, state)
 
 
 @router.callback_query(F.data.startswith("weblogin_"))
