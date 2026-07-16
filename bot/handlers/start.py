@@ -163,7 +163,20 @@ async def cmd_start(message: Message, state: FSMContext) -> None:
 
     # Dock the always-on "Bron qilish" launch button (constant Uzbek — language
     # is chosen next) so older users never have to type /start to begin again.
-    await message.answer(t("welcome_book_cta", lang), reply_markup=booking_cta_keyboard())
+    welcome_msg = await message.answer(t("welcome_book_cta", lang), reply_markup=booking_cta_keyboard())
+
+    # PIN the welcome/how-to so it stays at the very top of the chat — the true
+    # "always-there background message", visible even to returning users (the bot
+    # description only shows on the pre-Start screen). Silent, and we drop any
+    # earlier pin first so it never stacks or pings. Best-effort: a pin failure
+    # (permissions/hiccup) must never break /start.
+    try:
+        await message.bot.unpin_all_chat_messages(message.chat.id)
+        await message.bot.pin_chat_message(
+            message.chat.id, welcome_msg.message_id, disable_notification=True
+        )
+    except Exception:
+        logger.debug("Could not pin welcome message", exc_info=True)
 
     # Every /start asks for language first — older users often share a device
     # and expect to pick their language each time. set_language then routes on.
