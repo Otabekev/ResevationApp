@@ -5,10 +5,10 @@ from aiogram import Bot, Dispatcher
 from aiogram.client.default import DefaultBotProperties
 from aiogram.enums import ParseMode
 from aiogram.fsm.storage.redis import RedisStorage
-from aiogram.types import BotCommand, ErrorEvent
+from aiogram.types import BotCommand, ErrorEvent, MenuButtonCommands
 
 from config import BOT_TOKEN, REDIS_URL
-from handlers import booking, my_bookings, start
+from handlers import booking, fallback, my_bookings, start
 from i18n import t
 
 logging.basicConfig(level=logging.INFO)
@@ -42,6 +42,10 @@ async def main() -> None:
     dp.include_router(start.router)
     dp.include_router(booking.router)
     dp.include_router(my_bookings.router)
+    # LAST on purpose: the catch-all that re-docks the persistent keyboard when a
+    # user types anything unrecognized (Telegram sometimes drops the keyboard
+    # after days of inactivity — typing anything must bring the buttons back).
+    dp.include_router(fallback.router)
 
     @dp.errors()
     async def on_error(event: ErrorEvent) -> None:
@@ -63,6 +67,14 @@ async def main() -> None:
         BotCommand(command="start", description="📅 Bron qilish / Boshlash"),
         BotCommand(command="biznes", description="🏪 Biznesingizni bepul qo'shish"),
     ])
+    # Make the button left of the input field the COMMANDS menu (Boshlash /
+    # Biznes qo'shish) instead of a BotFather-configured web-app launcher — a
+    # customer whose docked keyboard vanished always has a visible one-tap way
+    # to restart the bot. Overrides any BotFather menu-button setting.
+    try:
+        await bot.set_chat_menu_button(menu_button=MenuButtonCommands())
+    except Exception:
+        logger.warning("Could not set chat menu button", exc_info=True)
 
     # Ambient "what is this + how to use" text shown the moment a user opens the
     # bot (the pre-Start screen) and on its profile — this is the always-there
