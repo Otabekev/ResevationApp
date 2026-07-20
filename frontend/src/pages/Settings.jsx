@@ -42,6 +42,7 @@ export default function Settings() {
           instagram_link: biz.instagram_link || "",
           description: biz.description || "",
           is_online_booking_enabled: biz.is_online_booking_enabled ?? true,
+          allow_any_staff: biz.allow_any_staff ?? true,
           slot_step_minutes: biz.slot_step_minutes ?? 15,
           min_advance_booking_minutes: biz.min_advance_booking_minutes ?? 60,
           max_advance_booking_days: biz.max_advance_booking_days ?? 30,
@@ -304,6 +305,22 @@ export default function Settings() {
                 aria-label={t("online_booking")}
                 checked={form.is_online_booking_enabled}
                 onChange={(e) => set("is_online_booking_enabled", e.target.checked)}
+              />
+              <span className="toggle-slider"></span>
+            </label>
+          </div>
+
+          <div className="row" style={{ justifyContent: "space-between", marginBottom: "var(--space-4)" }}>
+            <div>
+              <div style={{ fontWeight: 650, fontSize: "var(--text-sm)" }}>{t("allow_any_staff")}</div>
+              <div className="form-hint" style={{ marginTop: 2 }}>{t("allow_any_staff_hint")}</div>
+            </div>
+            <label className="toggle">
+              <input
+                type="checkbox"
+                aria-label={t("allow_any_staff")}
+                checked={form.allow_any_staff}
+                onChange={(e) => set("allow_any_staff", e.target.checked)}
               />
               <span className="toggle-slider"></span>
             </label>

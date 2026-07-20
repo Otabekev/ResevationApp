@@ -86,6 +86,7 @@ class BusinessUpdate(BaseModel):
     cancellation_policy_hours: int | None = None
     slot_step_minutes: int | None = None
     allow_multi_service: bool | None = None
+    allow_any_staff: bool | None = None
     custom_message_uz: str | None = Field(None, max_length=2000)
     custom_message_ru: str | None = Field(None, max_length=2000)
     custom_message_en: str | None = Field(None, max_length=2000)
@@ -113,6 +114,7 @@ class BusinessOut(BaseModel):
     cancellation_policy_hours: int
     slot_step_minutes: int
     allow_multi_service: bool
+    allow_any_staff: bool
     latitude: float | None
     longitude: float | None
     custom_message_uz: str | None
@@ -283,6 +285,7 @@ class PublicBusinessOut(BaseModel):
     description: str | None
     is_online_booking_enabled: bool
     allow_multi_service: bool
+    allow_any_staff: bool
     latitude: float | None
     longitude: float | None
     custom_message_uz: str | None
