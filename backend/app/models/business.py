@@ -71,6 +71,11 @@ class Business(Base):
     # Let a customer pick several services in one booking (done back-to-back by
     # one staff member, summed duration/price). Off by default.
     allow_multi_service: Mapped[bool] = mapped_column(Boolean, default=False, server_default="false")
+    # Offer the "Any available" staff choice in the booking flow. ON by default
+    # (interchangeable staff, e.g. barbers). Clinics turn it OFF so a patient must
+    # pick a SPECIFIC specialist — "any available" would assign an eye patient to
+    # a cardiologist. Auto-assignment only ever happens when this is on.
+    allow_any_staff: Mapped[bool] = mapped_column(Boolean, default=True, server_default="true")
 
     # Custom messaging
     custom_message_uz: Mapped[str | None] = mapped_column(Text, nullable=True)

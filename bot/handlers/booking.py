@@ -445,6 +445,8 @@ async def business_chosen(callback: CallbackQuery, state: FSMContext) -> None:
         business_name=biz.get("name", "—"),
         services_meta=services_meta,
         allow_multi=allow_multi,
+        # Clinics set this False so patients must pick a specific specialist.
+        allow_any_staff=bool(biz.get("allow_any_staff", True)),
         biz_has_location=has_location,
         selected_services=[],
         service_ids=None,
@@ -539,7 +541,11 @@ async def _show_staff_step(callback: CallbackQuery, state: FSMContext, data: dic
         need = set(selected)
         staff_list = [s for s in staff_list if need.issubset(set(s.get("service_ids") or []))]
 
-    rows = [[InlineKeyboardButton(text=t("any_staff", lang), callback_data="staff_any")]]
+    # "Any available" only when the business allows it (barbers). Clinics disable
+    # it so a patient must choose a specific specialist — never auto-assigned.
+    rows = []
+    if data.get("allow_any_staff", True):
+        rows.append([InlineKeyboardButton(text=t("any_staff", lang), callback_data="staff_any")])
     for s in staff_list:
         rows.append([InlineKeyboardButton(text=s["name"], callback_data=f"staff_{s['id']}")])
     rows.append([InlineKeyboardButton(text=t("back", lang), callback_data=f"biz_{business_id}")])
