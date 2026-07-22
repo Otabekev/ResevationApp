@@ -171,6 +171,42 @@ async def create_booking(payload: dict) -> dict:
     return resp.json()
 
 
+# ── Live queue ────────────────────────────────────────────────────────────────
+
+async def join_queue(payload: dict) -> dict:
+    resp = await _client.post(
+        f"{BACKEND_URL}/public/queue/join", json=payload, headers={"X-Bot-Secret": BOT_SECRET}
+    )
+    if resp.status_code == 400:
+        raise ValueError(resp.json().get("detail", "Cannot join"))
+    resp.raise_for_status()
+    return resp.json()
+
+
+async def queue_status(entry_id: int) -> dict:
+    resp = await _client.get(
+        f"{BACKEND_URL}/public/queue/status/{entry_id}", headers={"X-Bot-Secret": BOT_SECRET}
+    )
+    resp.raise_for_status()
+    return resp.json()
+
+
+async def queue_leave(entry_id: int) -> dict:
+    resp = await _client.post(
+        f"{BACKEND_URL}/public/queue/leave/{entry_id}", headers={"X-Bot-Secret": BOT_SECRET}
+    )
+    resp.raise_for_status()
+    return resp.json()
+
+
+async def queue_confirm(entry_id: int) -> dict:
+    resp = await _client.post(
+        f"{BACKEND_URL}/public/queue/confirm/{entry_id}", headers={"X-Bot-Secret": BOT_SECRET}
+    )
+    resp.raise_for_status()
+    return resp.json()
+
+
 async def get_customer_bookings(telegram_id: int, token: str, upcoming_only: bool = False) -> list[dict]:
     resp = await _client.get(
         f"{BACKEND_URL}/customers/{telegram_id}/bookings",

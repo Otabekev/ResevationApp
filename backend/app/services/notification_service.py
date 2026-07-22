@@ -250,3 +250,74 @@ def new_booking_alert_message(
         ),
     }
     return templates.get(lang, templates["uz"])
+
+
+# ── Live queue (walk-in line) messages ───────────────────────────────────────
+
+_QUEUE_LABELS = {
+    "uz": {
+        "joined": "🎫 Siz <b>{staff}</b> navbatiga qo'shildingiz.\nO'rningiz: <b>#{pos}</b>",
+        "wait": "\n⏳ Taxminiy kutish: ~{eta} daqiqa",
+        "next": "🔔 Siz <b>{staff}</b> navbatida <b>keyingisiz</b>. Iltimos, tayyor turing.",
+        "turn": "✅ <b>Sizning navbatingiz!</b>\n<b>{staff}</b>ga o'ting.",
+        "ping": "🕐 Siz hali ham <b>{staff}</b> navbatidasiz (o'rningiz #{pos}).\nHali ham kelyapsizmi?",
+        "dropped": "Siz <b>{staff}</b> navbatidan chiqarildingiz.",
+        "yes": "✅ Ha, kelyapman", "no": "❌ Yo'q, bekor",
+    },
+    "ru": {
+        "joined": "🎫 Вы встали в очередь к <b>{staff}</b>.\nВаше место: <b>#{pos}</b>",
+        "wait": "\n⏳ Примерное ожидание: ~{eta} мин",
+        "next": "🔔 Вы <b>следующий</b> в очереди к <b>{staff}</b>. Будьте готовы.",
+        "turn": "✅ <b>Ваша очередь!</b>\nПройдите к <b>{staff}</b>.",
+        "ping": "🕐 Вы всё ещё в очереди к <b>{staff}</b> (место #{pos}).\nВы ещё придёте?",
+        "dropped": "Вы были удалены из очереди к <b>{staff}</b>.",
+        "yes": "✅ Да, приду", "no": "❌ Нет, отменить",
+    },
+    "en": {
+        "joined": "🎫 You joined the line for <b>{staff}</b>.\nYour place: <b>#{pos}</b>",
+        "wait": "\n⏳ Estimated wait: ~{eta} min",
+        "next": "🔔 You're <b>next</b> in line for <b>{staff}</b>. Please be ready.",
+        "turn": "✅ <b>It's your turn!</b>\nPlease come to <b>{staff}</b>.",
+        "ping": "🕐 You're still in line for <b>{staff}</b> (place #{pos}).\nAre you still coming?",
+        "dropped": "You were removed from the line for <b>{staff}</b>.",
+        "yes": "✅ Yes, coming", "no": "❌ No, cancel",
+    },
+}
+
+
+def _ql(lang: str) -> dict:
+    return _QUEUE_LABELS.get(lang, _QUEUE_LABELS["uz"])
+
+
+def queue_joined_message(lang: str, staff_name: str, position: int, eta: int) -> str:
+    L = _ql(lang)
+    msg = L["joined"].format(staff=_esc(staff_name), pos=position)
+    if position > 1:
+        msg += L["wait"].format(eta=eta)
+    return msg
+
+
+def queue_next_message(lang: str, staff_name: str) -> str:
+    return _ql(lang)["next"].format(staff=_esc(staff_name))
+
+
+def queue_turn_message(lang: str, staff_name: str) -> str:
+    return _ql(lang)["turn"].format(staff=_esc(staff_name))
+
+
+def queue_dropped_message(lang: str, staff_name: str) -> str:
+    return _ql(lang)["dropped"].format(staff=_esc(staff_name))
+
+
+def queue_still_coming(lang: str, staff_name: str, position: int, entry_id: int) -> tuple[str, dict]:
+    """Returns (text, inline_keyboard dict) for the 'still coming?' ping. The bot
+    handles the q_yes_/q_no_ callbacks and calls the confirm/leave endpoints."""
+    L = _ql(lang)
+    text = L["ping"].format(staff=_esc(staff_name), pos=position)
+    markup = {
+        "inline_keyboard": [[
+            {"text": L["yes"], "callback_data": f"q_yes_{entry_id}"},
+            {"text": L["no"], "callback_data": f"q_no_{entry_id}"},
+        ]]
+    }
+    return text, markup

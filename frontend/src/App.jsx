@@ -11,6 +11,7 @@ import Login from "./pages/Login";
 // small on mid-range Androids. Login stays eager — it's the auth gate.
 const Dashboard = lazy(() => import("./pages/Dashboard"));
 const Bookings = lazy(() => import("./pages/Bookings"));
+const Queue = lazy(() => import("./pages/Queue"));
 const Services = lazy(() => import("./pages/Services"));
 const Staff = lazy(() => import("./pages/Staff"));
 const Schedule = lazy(() => import("./pages/Schedule"));
@@ -117,6 +118,7 @@ export default function App() {
             <Routes>
               <Route path="/" element={<Dashboard />} />
               <Route path="/bookings" element={<Bookings />} />
+              <Route path="/queue" element={<Queue />} />
               <Route path="/services" element={<Services />} />
               <Route path="/staff" element={<Staff />} />
               <Route path="/schedule" element={<Schedule />} />

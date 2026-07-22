@@ -14,6 +14,7 @@ import { refreshApp } from "../pwa";
 const NAV_ITEMS = [
   { path: "/", Icon: IconHome, key: "dashboard", mobile: true },
   { path: "/bookings", Icon: IconCalendar, key: "bookings", mobile: true },
+  { path: "/queue", Icon: IconClock, key: "queue", mobile: true },
   { path: "/services", Icon: IconScissors, key: "services", mobile: true },
   { path: "/staff", Icon: IconUsers, key: "staff", mobile: false },
   { path: "/schedule", Icon: IconClock, key: "schedule", mobile: false },
