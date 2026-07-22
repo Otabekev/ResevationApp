@@ -14,6 +14,7 @@ const EMPTY_FORM = {
   duration_minutes: 30, buffer_before_minutes: 0, buffer_after_minutes: 0,
   price: "", currency: "UZS",
   requires_confirmation: false, is_active: true, sort_order: 0,
+  online_bookable: true, max_per_day: "",
 };
 
 function fmtPrice(price, t) {
@@ -67,6 +68,8 @@ export default function Services() {
       ...EMPTY_FORM,
       ...svc,
       price: svc.price ?? "",
+      max_per_day: svc.max_per_day ?? "",
+      online_bookable: svc.online_bookable ?? true,
       description_uz: svc.description_uz || "",
       description_ru: svc.description_ru || "",
       description_en: svc.description_en || "",
@@ -85,6 +88,7 @@ export default function Services() {
       const payload = {
         ...form,
         price: form.price === "" ? null : parseFloat(form.price),
+        max_per_day: form.max_per_day === "" ? null : parseInt(form.max_per_day, 10),
         description_uz: form.description_uz || null,
         description_ru: form.description_ru || null,
         description_en: form.description_en || null,
@@ -290,6 +294,35 @@ export default function Services() {
                 <span className="toggle-slider"></span>
               </label>
             </div>
+
+            {/* Consult-first controls: customers can book online (or staff-only),
+                and an optional per-day cap (e.g. limit "Checkup" to 5/day). */}
+            <div className="form-group row" style={{ justifyContent: "space-between" }}>
+              <div>
+                <div style={{ fontWeight: 650, fontSize: "var(--text-sm)" }}>{t("online_bookable")}</div>
+                <div className="form-hint" style={{ marginTop: 2 }}>{t("online_bookable_hint")}</div>
+              </div>
+              <label className="toggle">
+                <input
+                  type="checkbox" aria-label={t("online_bookable")}
+                  checked={form.online_bookable}
+                  onChange={(e) => setForm({ ...form, online_bookable: e.target.checked })}
+                />
+                <span className="toggle-slider"></span>
+              </label>
+            </div>
+
+            {form.online_bookable && (
+              <div className="form-group">
+                <label>{t("max_per_day")}</label>
+                <input
+                  type="number" min="1" max="1000" value={form.max_per_day}
+                  placeholder={t("max_per_day_placeholder")}
+                  onChange={(e) => setForm({ ...form, max_per_day: e.target.value })}
+                />
+                <div className="form-hint" style={{ marginTop: 2 }}>{t("max_per_day_hint")}</div>
+              </div>
+            )}
 
             {!showDescriptions ? (
               <button

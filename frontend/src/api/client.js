@@ -228,6 +228,9 @@ export const getBookings = (bizId, params) =>
   api.get(`/businesses/${bizId}/bookings`, { params }).then((r) => r.data);
 export const createManualBooking = (bizId, data) =>
   api.post(`/businesses/${bizId}/bookings`, data).then((r) => r.data);
+// Reserve several treatment days for one patient at once. Returns {created, failed}.
+export const createTreatmentPlan = (bizId, data) =>
+  api.post(`/businesses/${bizId}/bookings/plan`, data, { timeout: 30000 }).then((r) => r.data);
 export const updateBookingStatus = (bookingId, status) =>
   api.patch(`/bookings/${bookingId}/status`, { status }).then((r) => r.data);
 export const cancelBooking = (bookingId, reason) =>

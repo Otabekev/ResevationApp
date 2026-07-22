@@ -121,6 +121,33 @@ class BookingCreateManual(BaseModel):
     _fill_service_ids = model_validator(mode="after")(_normalize_service_ids)
 
 
+class TreatmentPlanSlot(BaseModel):
+    booking_date: date
+    start_time: time
+
+
+class TreatmentPlanCreate(BaseModel):
+    """Reserve several days for one patient in a single action (e.g. a dentist's
+    multi-day treatment scheduled by the secretary after a checkup)."""
+    service_id: int
+    service_ids: list[int] | None = None
+    staff_id: int | None = None
+    customer_name: str = Field(..., min_length=1, max_length=255)
+    customer_phone: str = Field(..., min_length=3, max_length=20)
+    notes: str | None = Field(None, max_length=1000)
+    slots: list[TreatmentPlanSlot] = Field(..., min_length=1, max_length=60)
+
+    @field_validator("customer_phone")
+    @classmethod
+    def _valid_phone(cls, v: str) -> str:
+        normalized = _normalize_uz_phone(v)
+        if normalized is None:
+            raise ValueError("Enter a valid phone, e.g. +998 90 123 45 67")
+        return normalized
+
+    _fill_service_ids = model_validator(mode="after")(_normalize_service_ids)
+
+
 class BookingOut(BaseModel):
     id: int
     business_id: int
@@ -434,6 +461,34 @@ async def list_bookings(
     return out
 
 
+async def _resolve_manual_customer(db: AsyncSession, name: str, phone: str) -> Customer:
+    """Resolve the customer for a staff-created booking. Prefers a Telegram-linked
+    account matched by phone (so the booking reaches them with reminders), then a
+    walk-in match by phone AND name, else creates a fresh walk-in. Phones are
+    normalized identically on every path, so the match is reliable."""
+    customer = (
+        await db.execute(
+            select(Customer)
+            .where(and_(Customer.telegram_id.is_not(None), Customer.phone == phone))
+            .order_by(Customer.id)
+            .limit(1)
+        )
+    ).scalar_one_or_none()
+    if customer is None:
+        customer = (
+            await db.execute(
+                select(Customer)
+                .where(and_(Customer.telegram_id.is_(None), Customer.phone == phone, Customer.name == name))
+                .limit(1)
+            )
+        ).scalar_one_or_none()
+    if customer is None:
+        customer = Customer(telegram_id=None, name=name, phone=phone)
+        db.add(customer)
+        await db.flush()
+    return customer
+
+
 @router.post("/businesses/{business_id}/bookings", response_model=BookingOut, status_code=201)
 async def create_manual_booking(
     business_id: int,
@@ -446,33 +501,9 @@ async def create_manual_booking(
     if business.status in ("suspended", "blocked"):
         raise HTTPException(status_code=409, detail="This business is not accepting bookings")
 
-    # Walk-in customers have no Telegram account. Reuse an existing walk-in record
-    # with the same phone AND name (so a repeat customer keeps their history)
-    # instead of inserting a duplicate. Matching on name too means two different
-    # people who share a phone (a family landline, a shop's shared number) stay
-    # distinct records rather than one whose name flips to whoever booked last.
-    customer = (
-        await db.execute(
-            select(Customer)
-            .where(
-                and_(
-                    Customer.telegram_id.is_(None),
-                    Customer.phone == body.customer_phone,
-                    Customer.name == body.customer_name,
-                )
-            )
-            .limit(1)
-        )
-    ).scalar_one_or_none()
-    if customer is None:
-        customer = Customer(
-            telegram_id=None,  # walk-in: no Telegram account
-            name=body.customer_name,
-            phone=body.customer_phone,
-        )
-        db.add(customer)
-        await db.flush()
-    # Matched record already has this exact name — nothing to overwrite.
+    # Links to the patient's Telegram account by phone when possible, so a manual
+    # booking (e.g. a dentist's treatment day) reaches them with reminders.
+    customer = await _resolve_manual_customer(db, body.customer_name, body.customer_phone)
 
     service_ids = body.service_ids if business.allow_multi_service else [body.service_id]
     try:
@@ -494,6 +525,54 @@ async def create_manual_booking(
     await db.commit()
     await db.refresh(booking)
     return booking
+
+
+@router.post("/businesses/{business_id}/bookings/plan")
+async def create_treatment_plan(
+    business_id: int,
+    body: TreatmentPlanCreate,
+    user: User = Depends(get_current_dashboard_user),
+    db: AsyncSession = Depends(get_db),
+):
+    """Reserve several days for one patient at once (dentist treatment plan). Each
+    day is validated independently against availability; the response reports which
+    were created and which couldn't be (e.g. that slot was taken), so the secretary
+    can retry just the failures. The patient is linked by phone to their Telegram
+    account when possible, so every reserved day sends them reminders."""
+    business = await authorize_business_access(business_id, user, db)
+    if business.status in ("suspended", "blocked"):
+        raise HTTPException(status_code=409, detail="This business is not accepting bookings")
+
+    customer = await _resolve_manual_customer(db, body.customer_name, body.customer_phone)
+    await db.commit()  # persist the customer so a per-day rollback below can't lose it
+    customer = await db.get(Customer, customer.id)  # fresh, live reference after commit
+
+    service_ids = body.service_ids if business.allow_multi_service else [body.service_id]
+    created, failed = [], []
+    for slot in body.slots:
+        label = {"booking_date": str(slot.booking_date), "start_time": str(slot.start_time)[:5]}
+        try:
+            booking = await create_booking(
+                db,
+                business_id=business_id,
+                service_id=body.service_id,
+                staff_id=body.staff_id,
+                customer=customer,
+                booking_date=slot.booking_date,
+                start_time=slot.start_time,
+                notes=body.notes,
+                service_ids=service_ids,
+            )
+            await db.commit()
+            created.append({**label, "booking_id": booking.id})
+        except ValueError as e:
+            await db.rollback()
+            failed.append({**label, "reason": str(e)})
+        except Exception:
+            await db.rollback()
+            failed.append({**label, "reason": "error"})
+
+    return {"created": created, "failed": failed}
 
 
 # Allowed booking-status transitions, keyed on the CURRENT status. Terminal states

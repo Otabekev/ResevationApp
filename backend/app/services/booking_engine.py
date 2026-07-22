@@ -342,6 +342,23 @@ async def get_available_slots(
     if business.status in ("suspended", "blocked"):
         return []
 
+    # Per-service daily cap (e.g. a dentist's "Checkup" limited to N/day). Once a
+    # capped service is full for the day, offer no slots so it can't be overbooked.
+    for svc in services:
+        if getattr(svc, "max_per_day", None):
+            used = await db.scalar(
+                select(func.count(Booking.id)).where(
+                    and_(
+                        Booking.business_id == business_id,
+                        Booking.service_id == svc.id,
+                        Booking.booking_date == target_date,
+                        Booking.status.in_(("pending", "confirmed")),
+                    )
+                )
+            )
+            if (used or 0) >= svc.max_per_day:
+                return []
+
     # Booking-window enforcement (timezone-aware, Asia/Tashkent).
     _now = now_local()
     if target_date < _now.date():

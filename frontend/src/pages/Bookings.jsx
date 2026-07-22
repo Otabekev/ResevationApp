@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useState } from "react";
 import {
   getBookings, updateBookingStatus, cancelBooking,
-  createManualBooking, getServices, getStaff, getAvailability,
+  createManualBooking, createTreatmentPlan, getServices, getStaff, getAvailability,
 } from "../api/client";
 import useStore from "../store/useStore";
 import { useT } from "../i18n";
@@ -80,6 +80,13 @@ export default function Bookings() {
   const [slotsLoading, setSlotsLoading] = useState(false);
   const [saving, setSaving] = useState(false);
   const [modalError, setModalError] = useState("");
+
+  // Treatment-plan modal (reserve several days at once)
+  const [showPlan, setShowPlan] = useState(false);
+  const [plan, setPlan] = useState({ service_id: "", staff_id: "", customer_name: "", customer_phone: "" });
+  const [planDays, setPlanDays] = useState([{ date: dayjs().add(1, "day").format("YYYY-MM-DD"), time: "" }]);
+  const [planSaving, setPlanSaving] = useState(false);
+  const [planError, setPlanError] = useState("");
 
   useEffect(() => {
     if (!activeBusiness) return;
@@ -200,6 +207,51 @@ export default function Bookings() {
   };
 
   const set = (key, value) => setForm((f) => ({ ...f, [key]: value, ...(key !== "start_time" ? { start_time: "" } : {}) }));
+
+  // ── Treatment plan (multi-day) ──────────────────────────────────────────────
+  const openPlan = () => {
+    setPlan({ service_id: "", staff_id: "", customer_name: "", customer_phone: "" });
+    setPlanDays([{ date: dayjs().add(1, "day").format("YYYY-MM-DD"), time: "" }]);
+    setPlanError("");
+    setShowPlan(true);
+  };
+  const addPlanDay = () => setPlanDays((d) => [...d, { date: dayjs().add(d.length + 1, "day").format("YYYY-MM-DD"), time: "" }]);
+  const setPlanDay = (i, key, value) => setPlanDays((d) => d.map((row, idx) => (idx === i ? { ...row, [key]: value } : row)));
+  const removePlanDay = (i) => setPlanDays((d) => d.filter((_, idx) => idx !== i));
+
+  const handleSavePlan = async (e) => {
+    e.preventDefault();
+    if (!plan.service_id) { setPlanError(t("pick_service")); return; }
+    const digits = (plan.customer_phone || "").replace(/\D/g, "");
+    if (!(digits.length === 9 || (digits.length === 12 && digits.startsWith("998")))) {
+      setPlanError(t("invalid_phone")); return;
+    }
+    const rows = planDays.filter((r) => r.date && r.time);
+    if (rows.length === 0) { setPlanError(t("plan_add_a_day")); return; }
+    setPlanSaving(true);
+    setPlanError("");
+    try {
+      const res = await createTreatmentPlan(activeBusiness.id, {
+        service_id: parseInt(plan.service_id),
+        staff_id: plan.staff_id ? parseInt(plan.staff_id) : null,
+        customer_name: plan.customer_name,
+        customer_phone: plan.customer_phone,
+        slots: rows.map((r) => ({ booking_date: r.date, start_time: r.time + ":00" })),
+      });
+      setShowPlan(false);
+      const okN = res.created?.length || 0;
+      const failN = res.failed?.length || 0;
+      setToast({
+        message: t("plan_result", { ok: okN, fail: failN }),
+        variant: failN ? "error" : "success",
+      });
+      await load();
+    } catch (err) {
+      setPlanError(err.response?.data?.detail || t("error"));
+    } finally {
+      setPlanSaving(false);
+    }
+  };
   const svcName = (b) => b[`service_name_${lang}`] || b.service_name_uz || `#${b.service_id}`;
 
   if (!activeBusiness) {
@@ -213,9 +265,14 @@ export default function Bookings() {
           <h1 className="page-title">{t("bookings")}</h1>
           <p className="page-subtitle">{dayjs(date).format("DD MMMM YYYY")}</p>
         </div>
-        <button className="btn btn-primary" onClick={openModal}>
-          <IconPlus size={17} /> {t("new_booking")}
-        </button>
+        <div className="row" style={{ gap: "var(--space-2)", flexWrap: "wrap" }}>
+          <button className="btn btn-secondary" onClick={openPlan}>
+            <IconCalendar size={16} /> {t("treatment_plan")}
+          </button>
+          <button className="btn btn-primary" onClick={openModal}>
+            <IconPlus size={17} /> {t("new_booking")}
+          </button>
+        </div>
       </div>
 
       <div style={{ marginBottom: "var(--space-4)" }}>
@@ -432,6 +489,65 @@ export default function Bookings() {
                 {saving ? t("loading") : t("save")}
               </button>
             </div>
+          </form>
+        </Modal>
+      )}
+
+      {showPlan && (
+        <Modal title={t("treatment_plan")} onClose={() => setShowPlan(false)}>
+          <form onSubmit={handleSavePlan}>
+            <p className="form-hint" style={{ marginBottom: "var(--space-3)" }}>{t("treatment_plan_hint")}</p>
+            <div className="grid-2">
+              <div className="form-group">
+                <label>{t("full_name")} *</label>
+                <input required maxLength={255} value={plan.customer_name}
+                  onChange={(e) => setPlan({ ...plan, customer_name: e.target.value })} />
+              </div>
+              <div className="form-group">
+                <label>{t("phone")} *</label>
+                <input required type="tel" maxLength={20} value={plan.customer_phone}
+                  placeholder="+998 90 123 45 67"
+                  onChange={(e) => setPlan({ ...plan, customer_phone: e.target.value })} />
+              </div>
+              <div className="form-group">
+                <label>{t("service")} *</label>
+                <select required value={plan.service_id} onChange={(e) => setPlan({ ...plan, service_id: e.target.value })}>
+                  <option value="">—</option>
+                  {services.map((s) => <option key={s.id} value={s.id}>{s[`name_${lang}`] || s.name_uz}</option>)}
+                </select>
+              </div>
+              <div className="form-group">
+                <label>{t("staff")}</label>
+                <select value={plan.staff_id} onChange={(e) => setPlan({ ...plan, staff_id: e.target.value })}>
+                  <option value="">{t("any_staff")}</option>
+                  {staffList.filter((s) => s.is_provider !== false).map((s) => <option key={s.id} value={s.id}>{s.name}</option>)}
+                </select>
+              </div>
+            </div>
+
+            <label style={{ fontWeight: 650, fontSize: "var(--text-sm)" }}>{t("plan_days")}</label>
+            <div className="stack" style={{ gap: 8, margin: "6px 0 var(--space-3)" }}>
+              {planDays.map((row, i) => (
+                <div key={i} className="row" style={{ gap: 8 }}>
+                  <input type="date" value={row.date} onChange={(e) => setPlanDay(i, "date", e.target.value)}
+                    style={{ flex: 2, minHeight: 38, padding: "6px 8px" }} />
+                  <input type="time" value={row.time} onChange={(e) => setPlanDay(i, "time", e.target.value)}
+                    style={{ flex: 1, minHeight: 38, padding: "6px 8px" }} />
+                  {planDays.length > 1 && (
+                    <button type="button" className="btn btn-secondary btn-sm btn-icon" aria-label={t("remove")}
+                      onClick={() => removePlanDay(i)}><IconX size={15} /></button>
+                  )}
+                </div>
+              ))}
+            </div>
+            <button type="button" className="btn btn-ghost btn-sm" style={{ marginBottom: "var(--space-3)" }} onClick={addPlanDay}>
+              <IconPlus size={14} /> {t("plan_add_day")}
+            </button>
+
+            {planError && <p className="form-error" style={{ marginBottom: "var(--space-3)" }}>{planError}</p>}
+            <button type="submit" className="btn btn-primary btn-full" disabled={planSaving}>
+              {planSaving ? t("loading") : t("save")}
+            </button>
           </form>
         </Modal>
       )}

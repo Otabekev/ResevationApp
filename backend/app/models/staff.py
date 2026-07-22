@@ -32,6 +32,12 @@ class Staff(Base):
     # Whether this staff appears as a bookable provider (availability + public
     # roster). A pure secretary is False; doctors/barbers are True.
     is_provider: Mapped[bool] = mapped_column(Boolean, default=True, server_default="true")
+    # How this provider is booked: "appointments" (pick a time slot, default) or
+    # "queue" (join a live line, no fixed time — for variable-hours/walk-in flow).
+    # Per-provider so one clinic can mix modes across doctors.
+    scheduling_mode: Mapped[str] = mapped_column(String(20), default="appointments", server_default="appointments")
+    # Average minutes per patient, used to estimate wait time in queue mode.
+    queue_avg_minutes: Mapped[int] = mapped_column(Integer, default=15, server_default="15")
 
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
 
