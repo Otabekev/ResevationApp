@@ -161,6 +161,46 @@ async def test_secretary_absent_from_public_roster(client, db):
 
 # ── A deactivated secretary loses access ─────────────────────────────────────
 
+async def test_unlink_lets_owner_reissue_invite(client, db):
+    """A linked staff blocks a new invite (409). Unlink detaches the account so a
+    fresh invite works again — the fix for 'the first link didn't work'."""
+    cat = await f.create_category(db, slug="cUnlink")
+    owner = await f.create_user(db, role="business_owner", telegram_id=9030)
+    biz = await f.create_business(db, owner_id=owner.id, category_id=cat.id, status="active")
+    joined_user = await f.create_user(db, role="staff", telegram_id=9031, name="Joined")
+    staff = await f.create_staff(db, business_id=biz.id, user_id=joined_user.id, name="Dr. X")
+    h = f.auth_header(owner.id)
+
+    # Already linked → invite refused.
+    blocked = await client.post(f"{API}/businesses/{biz.id}/staff/{staff.id}/invite", headers=h)
+    assert blocked.status_code == 409
+
+    # Unlink, then a fresh invite works.
+    un = await client.post(f"{API}/businesses/{biz.id}/staff/{staff.id}/unlink", headers=h)
+    assert un.status_code == 200
+    assert un.json()["user_id"] is None
+    ok = await client.post(f"{API}/businesses/{biz.id}/staff/{staff.id}/invite", headers=h)
+    assert ok.status_code == 200
+    assert ok.json()["invite_url"]
+
+
+async def test_secretary_can_reissue_but_cross_tenant_unlink_blocked(client, db):
+    owner, biz, sec = await _clinic_with_secretary(db, tid_owner=9032, tid_sec=9033, slug="cUn2")
+    doctor = await f.create_staff(db, business_id=biz.id, user_id=None, name="Doc")
+    # Secretary (manager) may issue invites for her own clinic's staff.
+    r = await client.post(f"{API}/businesses/{biz.id}/staff/{doctor.id}/invite", headers=f.auth_header(sec.id))
+    assert r.status_code == 200
+
+    # But a secretary of another clinic cannot unlink here.
+    cat_b = await f.create_category(db, slug="cUn2B")
+    owner_b = await f.create_user(db, role="business_owner", telegram_id=9034)
+    biz_b = await f.create_business(db, owner_id=owner_b.id, category_id=cat_b.id, status="active")
+    outsider = await f.create_user(db, role="staff", telegram_id=9035, name="Outsider")
+    await f.create_staff(db, business_id=biz_b.id, user_id=outsider.id, can_manage=True, is_provider=False)
+    leak = await client.post(f"{API}/businesses/{biz.id}/staff/{doctor.id}/unlink", headers=f.auth_header(outsider.id))
+    assert leak.status_code in (403, 404)
+
+
 async def test_deactivated_secretary_loses_access(client, db):
     owner, biz, sec = await _clinic_with_secretary(db, tid_owner=9020, tid_sec=9021, slug="cDeact")
     # Owner deactivates her staff row.

@@ -1,7 +1,7 @@
 import { useEffect, useState } from "react";
 import {
   getStaff, createStaff, updateStaff, deleteStaff, getServices, setStaffServices, createStaffInvite,
-  getStaffWorkingHours, setStaffWorkingHours, clearStaffWorkingHours, addSelfProvider,
+  unlinkStaff, getStaffWorkingHours, setStaffWorkingHours, clearStaffWorkingHours, addSelfProvider,
 } from "../api/client";
 import useStore from "../store/useStore";
 import { useT } from "../i18n";
@@ -132,11 +132,18 @@ export default function Staff() {
 
   const handleInvite = async (staff) => {
     try {
+      // If someone already joined on this record, re-issuing means detaching that
+      // account first (wrong person joined, or the first link never worked).
+      if (staff.user_id) {
+        if (!window.confirm(t("reinvite_confirm", { name: staff.name }))) return;
+        await unlinkStaff(activeBusiness.id, staff.id);
+      }
       const data = await createStaffInvite(activeBusiness.id, staff.id);
-      setInvite({ staff, data });
+      setInvite({ staff: { ...staff, user_id: null }, data });
       setCopied(false);
-    } catch {
-      setToast({ message: t("error"), variant: "error" });
+      await load(); // reflect the joined → not-joined change in the list
+    } catch (e) {
+      setToast({ message: e.response?.data?.detail || t("error"), variant: "error" });
     }
   };
 
@@ -257,8 +264,16 @@ export default function Staff() {
                   <button className="btn btn-secondary btn-sm btn-icon" title={t("working_hours")} aria-label={t("working_hours")} onClick={() => openHours(s)}>
                     <IconClock size={16} />
                   </button>
-                  {!s.user_id && (
-                    <button className="btn btn-secondary btn-sm btn-icon" title={t("invite_link")} aria-label={t("invite_link")} onClick={() => handleInvite(s)}>
+                  {/* Always available (except the owner's own provider): lets the
+                      owner RE-issue a link if the wrong person joined or the first
+                      link never worked (handleInvite unlinks first when joined). */}
+                  {!s.is_owner && (
+                    <button
+                      className="btn btn-secondary btn-sm btn-icon"
+                      title={s.user_id ? t("reinvite_link") : t("invite_link")}
+                      aria-label={s.user_id ? t("reinvite_link") : t("invite_link")}
+                      onClick={() => handleInvite(s)}
+                    >
                       <IconLink size={16} />
                     </button>
                   )}

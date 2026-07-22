@@ -186,6 +186,9 @@ export const deleteStaff = (bizId, staffId) =>
   api.delete(`/businesses/${bizId}/staff/${staffId}`).then((r) => r.data);
 export const setStaffServices = (bizId, staffId, serviceIds) =>
   api.put(`/businesses/${bizId}/staff/${staffId}/services`, serviceIds, { retryable: true }).then((r) => r.data);
+// Detach a staff member's linked Telegram account so a fresh invite can be issued.
+export const unlinkStaff = (bizId, staffId) =>
+  api.post(`/businesses/${bizId}/staff/${staffId}/unlink`).then((r) => r.data);
 export const createStaffInvite = (bizId, staffId) =>
   api.post(`/businesses/${bizId}/staff/${staffId}/invite`).then((r) => r.data);
 

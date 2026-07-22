@@ -411,6 +411,37 @@ async def create_invite(
     return InviteOut(token=token, invite_url=invite_url, expires_at=expires_at)
 
 
+@router.post("/{staff_id}/unlink", response_model=StaffOut)
+async def unlink_staff_account(
+    business_id: int,
+    staff_id: int,
+    user: User = Depends(get_current_dashboard_user),
+    db: AsyncSession = Depends(get_db),
+):
+    """Detach the Telegram account linked to this staff record so a FRESH invite
+    can be issued — e.g. the wrong person joined, or the first link never worked.
+    Keeps the staff profile, services, and hours; clears only the account link and
+    voids any outstanding invites. The owner's own provider (is_owner) can't be
+    unlinked (they're auto-linked, never invited)."""
+    await authorize_business_access(business_id, user, db)
+    staff = await db.get(Staff, staff_id)
+    if not staff or staff.business_id != business_id:
+        raise HTTPException(status_code=404, detail="Staff not found")
+    if staff.is_owner:
+        raise HTTPException(status_code=400, detail="Cannot unlink the owner's own provider")
+
+    staff.user_id = None
+    await db.execute(
+        update(StaffInvite)
+        .where(and_(StaffInvite.staff_id == staff_id, StaffInvite.is_active == True))  # noqa: E712
+        .values(is_active=False)
+    )
+    db.add(staff)
+    await db.commit()
+    await db.refresh(staff)
+    return await _staff_with_services(staff, db)
+
+
 class JoinRequest(BaseModel):
     # The phone the joiner shared via Telegram's "share contact" button. Verified
     # against the staff record's phone so a forwarded link can't be redeemed by
