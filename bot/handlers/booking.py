@@ -534,12 +534,17 @@ async def _show_staff_step(callback: CallbackQuery, state: FSMContext, data: dic
                 staff_names={str(s["id"]): s["name"] for s in staff_list},
             )
 
-    # For a multi-service selection, only offer staff who can do EVERY chosen
-    # service (the backend enforces this too; this just keeps the list honest).
+    # Only offer staff who can perform the chosen service(s), so a customer never
+    # sees a specialist who doesn't do what they picked (a clinic's cardiologist
+    # must not appear for an eye exam). The required set is the multi-service
+    # selection when present, else the single chosen service. The backend
+    # availability check enforces this too; this keeps the picker honest.
     selected = data.get("selected_services")
-    if selected:
-        need = set(selected)
-        staff_list = [s for s in staff_list if need.issubset(set(s.get("service_ids") or []))]
+    required = set(selected) if selected else (
+        {data["service_id"]} if data.get("service_id") else set()
+    )
+    if required:
+        staff_list = [s for s in staff_list if required.issubset(set(s.get("service_ids") or []))]
 
     # "Any available" only when the business allows it (barbers). Clinics disable
     # it so a patient must choose a specific specialist — never auto-assigned.
@@ -574,11 +579,19 @@ async def service_chosen(callback: CallbackQuery, state: FSMContext) -> None:
     # Name + price were already fetched in business_chosen and stashed in state —
     # no need to re-pull the whole services list from the backend here.
     meta = (data.get("services_meta") or {}).get(str(service_id), {})
+    service_name = meta.get("name") or "—"
     await state.update_data(
         service_id=service_id,
-        service_name=meta.get("name") or "—",
+        service_name=service_name,
         service_price=meta.get("price"),
     )
+
+    # `data` was read BEFORE the write above, so reflect the new values into the
+    # local copy — _show_staff_step reads service_id from it to filter the staff
+    # to those who perform this service, and service_name for the header.
+    data["service_id"] = service_id
+    data["service_name"] = service_name
+    data["service_price"] = meta.get("price")
 
     await _show_staff_step(callback, state, data=data)
 
