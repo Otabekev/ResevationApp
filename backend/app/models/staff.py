@@ -25,6 +25,13 @@ class Staff(Base):
     # True when this provider record IS the business owner working as a bookable
     # provider (auto-linked to the owner's account, no invite). One per business.
     is_owner: Mapped[bool] = mapped_column(Boolean, default=False, server_default="false")
+    # Desk-manager (secretary): once linked to a User account, that user may manage
+    # THIS business's dashboard — bookings, schedules, staff, services — without
+    # owning it. Authorization is per-business (see deps.authorize_business_access).
+    can_manage: Mapped[bool] = mapped_column(Boolean, default=False, server_default="false")
+    # Whether this staff appears as a bookable provider (availability + public
+    # roster). A pure secretary is False; doctors/barbers are True.
+    is_provider: Mapped[bool] = mapped_column(Boolean, default=True, server_default="true")
 
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
 

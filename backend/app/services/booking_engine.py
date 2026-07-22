@@ -369,6 +369,7 @@ async def get_available_slots(
                     Staff.id == staff_id,
                     Staff.business_id == business_id,  # scope to this business (defense-in-depth)
                     Staff.is_active == True,
+                    Staff.is_provider == True,  # never book a desk-manager (secretary)
                 )
             )
         )
@@ -384,6 +385,7 @@ async def get_available_slots(
                     StaffService.service_id.in_(unique_ids),
                     Staff.business_id == business_id,
                     Staff.is_active == True,
+                    Staff.is_provider == True,  # never auto-assign a desk-manager
                 )
             )
             .group_by(Staff.id)

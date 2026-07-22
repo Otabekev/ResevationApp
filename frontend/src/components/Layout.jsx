@@ -201,11 +201,15 @@ function UserMenu() {
 }
 
 export default function Layout({ children }) {
-  const { user, lang } = useStore();
+  const { user, lang, activeBusiness } = useStore();
   const t = useT(lang);
 
   const isAdmin = user?.role === "super_admin";
-  const allNav = isAdmin ? ADMIN_NAV_ITEMS : NAV_ITEMS;
+  // A desk-manager (secretary) can't change business settings/storefront — hide
+  // the owner-only Settings page. The backend enforces this regardless of the UI.
+  const isManager = !isAdmin && activeBusiness?.access_role === "manager";
+  let allNav = isAdmin ? ADMIN_NAV_ITEMS : NAV_ITEMS;
+  if (isManager) allNav = allNav.filter((item) => item.path !== "/settings");
 
   return (
     <div className="layout">

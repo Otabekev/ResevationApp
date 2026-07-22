@@ -7,7 +7,14 @@ from sqlalchemy import and_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.database import get_db
-from app.deps import get_current_business_owner, get_current_user, require_bot_secret
+from app.deps import (
+    authorize_business_access,
+    get_current_business_owner,
+    get_current_dashboard_user,
+    get_current_user,
+    is_business_manager,
+    require_bot_secret,
+)
 from app.limiter import limiter
 from app.models.booking import Booking, Customer, booking_services
 from app.models.business import Business
@@ -355,12 +362,11 @@ async def list_bookings(
     staff_id: int | None = Query(None),
     limit: int = Query(200, ge=1, le=500),
     offset: int = Query(0, ge=0),
-    user: User = Depends(get_current_business_owner),
+    user: User = Depends(get_current_dashboard_user),
     db: AsyncSession = Depends(get_db),
 ):
-    business = await db.get(Business, business_id)
-    if not business or (business.owner_id != user.id and user.role != "super_admin"):
-        raise HTTPException(status_code=403)
+    # Owner OR desk-manager may view this business's bookings.
+    await authorize_business_access(business_id, user, db)
 
     filters = [Booking.business_id == business_id]
     if booking_date:
@@ -432,13 +438,11 @@ async def list_bookings(
 async def create_manual_booking(
     business_id: int,
     body: BookingCreateManual,
-    user: User = Depends(get_current_business_owner),
+    user: User = Depends(get_current_dashboard_user),
     db: AsyncSession = Depends(get_db),
 ):
-    """Business owner manually creates a booking (walk-in, phone call, etc.)."""
-    business = await db.get(Business, business_id)
-    if not business or (business.owner_id != user.id and user.role != "super_admin"):
-        raise HTTPException(status_code=403)
+    """Owner or desk-manager manually creates a booking (walk-in, phone call)."""
+    business = await authorize_business_access(business_id, user, db)
     if business.status in ("suspended", "blocked"):
         raise HTTPException(status_code=409, detail="This business is not accepting bookings")
 
@@ -523,8 +527,9 @@ async def update_booking_status(
     staff = await db.get(Staff, booking.staff_id) if booking.staff_id else None
     is_owner = business and business.owner_id == user.id
     is_assigned_staff = staff and staff.user_id == user.id
+    is_manager = await is_business_manager(booking.business_id, user, db)
 
-    if not is_owner and not is_assigned_staff and user.role != "super_admin":
+    if not is_owner and not is_assigned_staff and not is_manager and user.role != "super_admin":
         raise HTTPException(status_code=403)
 
     # Idempotent: re-applying the current status is a no-op and must NOT re-fire
@@ -608,16 +613,19 @@ async def cancel_booking(
     business = await db.get(Business, booking.business_id)
     customer = await db.get(Customer, booking.customer_id) if booking.customer_id else None
     is_owner = business and business.owner_id == user.id
+    is_manager = await is_business_manager(booking.business_id, user, db)
     is_customer = (
         customer
         and customer.telegram_id is not None
         and customer.telegram_id == user.telegram_id
     )
 
-    if not is_owner and not is_customer and user.role != "super_admin":
+    if not is_owner and not is_manager and not is_customer and user.role != "super_admin":
         raise HTTPException(status_code=403)
 
-    booking.status = "cancelled_by_business" if (is_owner or user.role == "super_admin") and not is_customer else "cancelled_by_customer"
+    # Owner/manager/admin cancelling on the business side → cancelled_by_business.
+    cancelled_by_business_side = (is_owner or is_manager or user.role == "super_admin") and not is_customer
+    booking.status = "cancelled_by_business" if cancelled_by_business_side else "cancelled_by_customer"
     booking.cancellation_reason = body.reason
     booking.cancelled_at = datetime.now(timezone.utc)
     db.add(booking)

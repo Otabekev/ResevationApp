@@ -6,7 +6,7 @@ from sqlalchemy import and_, delete, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.database import get_db
-from app.deps import get_current_business_owner, get_current_user
+from app.deps import authorize_business_access, get_current_dashboard_user, get_current_user, is_business_manager
 from app.models.business import Business
 from app.models.schedule import BlockedTime, BreakTime, WorkingHours
 from app.models.staff import Staff
@@ -107,28 +107,20 @@ class BlockedTimeOut(BaseModel):
     model_config = {"from_attributes": True}
 
 
-# ── Helpers ──────────────────────────────────────────────────────────────────
-
-async def _get_owned_business(business_id: int, user: User, db: AsyncSession) -> Business:
-    business = await db.get(Business, business_id)
-    if not business:
-        raise HTTPException(status_code=404, detail="Business not found")
-    if business.owner_id != user.id and user.role != "super_admin":
-        raise HTTPException(status_code=403, detail="Forbidden")
-    return business
-
+# All schedule endpoints are manager-allowed: the owner OR a desk-manager may
+# edit hours/breaks/blocks. authorize_business_access enforces per-business scope.
 
 # ── Business working hours ────────────────────────────────────────────────────
 
 @router.get("/businesses/{business_id}/working-hours", response_model=list[WorkingHoursOut])
 async def get_business_hours(
     business_id: int,
-    user: User = Depends(get_current_business_owner),
+    user: User = Depends(get_current_dashboard_user),
     db: AsyncSession = Depends(get_db),
 ):
     # Owner-only: these were unauthenticated, letting anyone enumerate any (even
     # pending/suspended) business's schedule by iterating business_id.
-    await _get_owned_business(business_id, user, db)
+    await authorize_business_access(business_id, user, db)
     result = await db.execute(
         select(WorkingHours).where(
             and_(WorkingHours.business_id == business_id, WorkingHours.staff_id.is_(None))
@@ -141,10 +133,10 @@ async def get_business_hours(
 async def set_business_hours(
     business_id: int,
     body: WorkingHoursSet,
-    user: User = Depends(get_current_business_owner),
+    user: User = Depends(get_current_dashboard_user),
     db: AsyncSession = Depends(get_db),
 ):
-    await _get_owned_business(business_id, user, db)
+    await authorize_business_access(business_id, user, db)
 
     await db.execute(
         delete(WorkingHours).where(
@@ -169,10 +161,10 @@ async def set_business_hours(
 async def get_staff_hours(
     business_id: int,
     staff_id: int,
-    user: User = Depends(get_current_business_owner),
+    user: User = Depends(get_current_dashboard_user),
     db: AsyncSession = Depends(get_db),
 ):
-    await _get_owned_business(business_id, user, db)
+    await authorize_business_access(business_id, user, db)
     staff = await db.get(Staff, staff_id)
     if not staff or staff.business_id != business_id:
         raise HTTPException(status_code=404, detail="Staff not found")
@@ -197,7 +189,8 @@ async def set_staff_hours(
     business = await db.get(Business, business_id)
     is_owner = business and business.owner_id == user.id
     is_self = staff.user_id == user.id and staff.can_set_own_hours
-    if not is_owner and not is_self and user.role != "super_admin":
+    is_manager = await is_business_manager(business_id, user, db)
+    if not is_owner and not is_self and not is_manager and user.role != "super_admin":
         raise HTTPException(status_code=403, detail="Forbidden")
 
     await db.execute(delete(WorkingHours).where(WorkingHours.staff_id == staff_id))
@@ -217,11 +210,11 @@ async def set_staff_hours(
 async def clear_staff_hours(
     business_id: int,
     staff_id: int,
-    user: User = Depends(get_current_business_owner),
+    user: User = Depends(get_current_dashboard_user),
     db: AsyncSession = Depends(get_db),
 ):
     """Remove staff-specific hours so the member falls back to business hours."""
-    await _get_owned_business(business_id, user, db)
+    await authorize_business_access(business_id, user, db)
     staff = await db.get(Staff, staff_id)
     if not staff or staff.business_id != business_id:
         raise HTTPException(status_code=404, detail="Staff not found")
@@ -234,10 +227,10 @@ async def clear_staff_hours(
 @router.get("/businesses/{business_id}/breaks", response_model=list[BreakOut])
 async def get_breaks(
     business_id: int,
-    user: User = Depends(get_current_business_owner),
+    user: User = Depends(get_current_dashboard_user),
     db: AsyncSession = Depends(get_db),
 ):
-    await _get_owned_business(business_id, user, db)
+    await authorize_business_access(business_id, user, db)
     result = await db.execute(
         select(BreakTime).where(
             and_(BreakTime.business_id == business_id, BreakTime.staff_id.is_(None))
@@ -250,10 +243,10 @@ async def get_breaks(
 async def add_break(
     business_id: int,
     body: BreakCreate,
-    user: User = Depends(get_current_business_owner),
+    user: User = Depends(get_current_dashboard_user),
     db: AsyncSession = Depends(get_db),
 ):
-    await _get_owned_business(business_id, user, db)
+    await authorize_business_access(business_id, user, db)
     brk = BreakTime(business_id=business_id, **body.model_dump())
     db.add(brk)
     await db.commit()
@@ -265,10 +258,10 @@ async def add_break(
 async def delete_break(
     business_id: int,
     break_id: int,
-    user: User = Depends(get_current_business_owner),
+    user: User = Depends(get_current_dashboard_user),
     db: AsyncSession = Depends(get_db),
 ):
-    await _get_owned_business(business_id, user, db)
+    await authorize_business_access(business_id, user, db)
     brk = await db.get(BreakTime, break_id)
     if not brk or brk.business_id != business_id:
         raise HTTPException(status_code=404)
@@ -282,10 +275,10 @@ async def delete_break(
 async def list_blocked_times(
     business_id: int,
     include_past: bool = False,
-    user: User = Depends(get_current_business_owner),
+    user: User = Depends(get_current_dashboard_user),
     db: AsyncSession = Depends(get_db),
 ):
-    await _get_owned_business(business_id, user, db)
+    await authorize_business_access(business_id, user, db)
     from app.timeutils import now_local, to_local
 
     filters = [BlockedTime.business_id == business_id, BlockedTime.staff_id.is_(None)]
@@ -307,10 +300,10 @@ async def list_blocked_times(
 async def add_blocked_time(
     business_id: int,
     body: BlockedTimeCreate,
-    user: User = Depends(get_current_business_owner),
+    user: User = Depends(get_current_dashboard_user),
     db: AsyncSession = Depends(get_db),
 ):
-    await _get_owned_business(business_id, user, db)
+    await authorize_business_access(business_id, user, db)
 
     bt = BlockedTime(
         business_id=business_id,
@@ -330,10 +323,10 @@ async def add_blocked_time(
 async def delete_blocked_time(
     business_id: int,
     blocked_id: int,
-    user: User = Depends(get_current_business_owner),
+    user: User = Depends(get_current_dashboard_user),
     db: AsyncSession = Depends(get_db),
 ):
-    await _get_owned_business(business_id, user, db)
+    await authorize_business_access(business_id, user, db)
     bt = await db.get(BlockedTime, blocked_id)
     if not bt or bt.business_id != business_id:
         raise HTTPException(status_code=404)

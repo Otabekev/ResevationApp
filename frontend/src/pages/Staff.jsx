@@ -14,7 +14,7 @@ import {
   IconTelegram, IconCheck, IconRefresh, IconTrash,
 } from "../components/icons";
 
-const EMPTY_FORM = { name: "", phone: "", bio: "", role: "staff", can_set_own_hours: false, is_active: true };
+const EMPTY_FORM = { name: "", phone: "", bio: "", role: "staff", can_set_own_hours: false, is_active: true, can_manage: false, is_provider: true };
 
 const DEFAULT_HOURS = Array.from({ length: 7 }, (_, i) => ({
   day_of_week: i, start_time: "09:00", end_time: "18:00", is_day_off: i === 6,
@@ -68,7 +68,7 @@ export default function Staff() {
 
   const openNew = () => { setForm(EMPTY_FORM); setEditing(null); setShowModal(true); };
   const openEdit = (s) => {
-    setForm({ name: s.name, phone: s.phone || "", bio: s.bio || "", role: s.role, can_set_own_hours: s.can_set_own_hours, is_active: s.is_active });
+    setForm({ name: s.name, phone: s.phone || "", bio: s.bio || "", role: s.role, can_set_own_hours: s.can_set_own_hours, is_active: s.is_active, can_manage: s.can_manage, is_provider: s.is_provider });
     setEditing(s.id);
     setShowModal(true);
   };
@@ -243,7 +243,7 @@ export default function Staff() {
                   <div className="row" style={{ gap: 8, flexWrap: "wrap" }}>
                     <span style={{ fontWeight: 750, fontSize: "var(--text-md)" }}>{s.name}</span>
                     {s.is_owner && <span className="chip brand"><IconCheck size={12} /> {t("you_provider")}</span>}
-                    {s.role === "manager" && !s.is_owner && <span className="chip honey">{t("role_manager")}</span>}
+                    {s.can_manage && !s.is_owner && <span className="chip honey">{t("role_secretary")}</span>}
                     {!s.is_active && <span className="chip">{t("inactive")}</span>}
                     {!s.is_owner && (s.user_id ? (
                       <span className="chip brand"><IconCheck size={12} /> {t("staff_joined")}</span>
@@ -319,12 +319,27 @@ export default function Staff() {
               <label>{t("phone")}</label>
               <input type="tel" maxLength={20} value={form.phone} onChange={(e) => setForm({ ...form, phone: e.target.value })} placeholder="+998 90 123 45 67" />
             </div>
-            <div className="form-group">
-              <label>{t("role")}</label>
-              <select value={form.role} onChange={(e) => setForm({ ...form, role: e.target.value })}>
-                <option value="staff">{t("role_staff")}</option>
-                <option value="manager">{t("role_manager")}</option>
-              </select>
+            {/* Secretary = a desk-manager who can run the dashboard (bookings,
+                schedules, all doctors) but isn't bookable as a provider. */}
+            <div className="form-group row" style={{ justifyContent: "space-between" }}>
+              <div>
+                <div style={{ fontWeight: 650, fontSize: "var(--text-sm)" }}>{t("staff_is_secretary")}</div>
+                <div className="form-hint" style={{ marginTop: 2 }}>{t("staff_is_secretary_hint")}</div>
+              </div>
+              <label className="toggle">
+                <input
+                  type="checkbox"
+                  checked={form.can_manage}
+                  aria-label={t("staff_is_secretary")}
+                  onChange={(e) => setForm({
+                    ...form,
+                    can_manage: e.target.checked,
+                    is_provider: !e.target.checked,
+                    role: e.target.checked ? "manager" : "staff",
+                  })}
+                />
+                <span className="toggle-slider"></span>
+              </label>
             </div>
             <div className="form-group row" style={{ justifyContent: "space-between" }}>
               <div>
