@@ -308,6 +308,97 @@ async def _purge_old_notifications_safe() -> None:
         logger.exception("Notification purge failed")
 
 
+# ── Live-queue maintenance ────────────────────────────────────────────────────
+# Only touches the FRONT few waiting people of each line who have Telegram — a
+# tiny, bounded query — so it stays cheap no matter how idle the platform is.
+_QUEUE_PING_STALE_MIN = 4   # re-ask "still coming?" once a ping is this old
+_QUEUE_MAX_MISSES = 2       # drop after this many unanswered pings
+_QUEUE_FRONT_N = 3          # only ping the front of each line
+
+
+async def _queue_maintenance() -> None:
+    from app.models.queue import QueueEntry
+    from app.models.staff import Staff
+    from app.services.notification_service import (
+        queue_dropped_message, queue_next_message, queue_still_coming,
+    )
+    from app.services.queue_engine import front_waiting
+
+    now = datetime.now(timezone.utc)
+    stale_before = now - timedelta(minutes=_QUEUE_PING_STALE_MIN)
+    async with AsyncSessionLocal() as db:
+        rows = (
+            await db.execute(
+                select(QueueEntry)
+                .where(and_(QueueEntry.status == "waiting", QueueEntry.telegram_id.is_not(None)))
+                .order_by(QueueEntry.staff_id, QueueEntry.id)
+            )
+        ).scalars().all()
+        # Take the front N per line (by join order) that are due for a ping.
+        seen: dict[int, int] = {}
+        due: list[tuple] = []  # (entry, position)
+        for e in rows:
+            n = seen.get(e.staff_id, 0)
+            if n >= _QUEUE_FRONT_N:
+                continue
+            seen[e.staff_id] = n + 1
+            if e.last_ping_at is not None and e.last_ping_at > stale_before:
+                continue  # pinged recently — leave them alone
+            due.append((e, n + 1))
+        if not due:
+            return
+
+        staff_ids = {e.staff_id for e, _ in due}
+        staff_map = {
+            s.id: s
+            for s in (await db.execute(select(Staff).where(Staff.id.in_(staff_ids)))).scalars().all()
+        }
+        sends: list[tuple] = []       # (chat_id, text, markup)
+        dropped_staff: set[int] = set()
+        for entry, position in due:
+            staff = staff_map.get(entry.staff_id)
+            if not staff:
+                continue
+            if entry.ping_misses >= _QUEUE_MAX_MISSES:
+                entry.status = "no_show"
+                entry.finished_at = now
+                db.add(entry)
+                sends.append((entry.telegram_id, queue_dropped_message(entry.language, staff.name), None))
+                dropped_staff.add(entry.staff_id)
+            else:
+                text, markup = queue_still_coming(entry.language, staff.name, position, entry.id)
+                entry.last_ping_at = now
+                entry.ping_misses += 1
+                db.add(entry)
+                sends.append((entry.telegram_id, text, markup))
+        await db.commit()
+
+        # A drop advances its line — tell the new #1 they're next.
+        for sid in dropped_staff:
+            staff = staff_map.get(sid)
+            if not staff:
+                continue
+            fronts = await front_waiting(db, sid, 1)
+            if fronts and fronts[0].telegram_id and fronts[0].notified_position != 1:
+                fronts[0].notified_position = 1
+                db.add(fronts[0])
+                sends.append((fronts[0].telegram_id, queue_next_message(fronts[0].language, staff.name), None))
+        await db.commit()
+
+        for chat_id, text, markup in sends:
+            try:
+                await send_telegram_message(chat_id, text, reply_markup=markup)
+            except Exception:
+                logger.warning("queue ping send failed for chat %s", chat_id, exc_info=True)
+
+
+async def _queue_maintenance_safe() -> None:
+    try:
+        await _queue_maintenance()
+    except Exception:
+        logger.exception("queue maintenance sweep failed")
+
+
 def start_scheduler() -> None:
     global last_reminder_run
     last_reminder_run = datetime.now(timezone.utc)  # grace before the first sweep
@@ -352,6 +443,17 @@ def start_scheduler() -> None:
         coalesce=True,
         max_instances=1,
         misfire_grace_time=3600,
+    )
+    # Live-queue "still coming?" pings + drop of non-responders. Every 3 min; the
+    # query is bounded to the front of each line, so it's cheap even at idle.
+    scheduler.add_job(
+        _queue_maintenance_safe,
+        "interval",
+        minutes=3,
+        id="queue_maintenance",
+        coalesce=True,
+        max_instances=1,
+        misfire_grace_time=120,
     )
     scheduler.start()
 

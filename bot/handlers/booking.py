@@ -532,6 +532,7 @@ async def _show_staff_step(callback: CallbackQuery, state: FSMContext, data: dic
             await state.update_data(
                 staff_cache=staff_list,
                 staff_names={str(s["id"]): s["name"] for s in staff_list},
+                staff_modes={str(s["id"]): s.get("scheduling_mode", "appointments") for s in staff_list},
             )
 
     # Only offer staff who can perform the chosen service(s), so a customer never
@@ -674,7 +675,21 @@ async def staff_chosen(callback: CallbackQuery, state: FSMContext) -> None:
             return
         staff_name = (data.get("staff_names") or {}).get(raw, f"#{raw}")
 
-    await state.update_data(staff_id=staff_id, staff_name=staff_name)
+    # Queue-mode doctor → no time slots. Collect name/phone (reusing the entry
+    # steps), then join their live line in phone_entered.
+    mode = (data.get("staff_modes") or {}).get(raw, "appointments") if raw != "any" else "appointments"
+    if mode == "queue":
+        await state.update_data(staff_id=staff_id, staff_name=staff_name, queue_mode=True)
+        data["staff_name"] = staff_name
+        await _render_step(
+            callback.message,
+            _step(data, lang, ("business", "service", "staff"), "queue_enter_name"),
+            _entry_nav_kb(lang),
+        )
+        await state.set_state(BookingFSM.entering_name)
+        return
+
+    await state.update_data(staff_id=staff_id, staff_name=staff_name, queue_mode=False)
     data["staff_name"] = staff_name  # data was read before this write — reflect it in the header
     await _render_step(
         callback.message,
@@ -825,6 +840,35 @@ async def phone_entered(message: Message, state: FSMContext) -> None:
     customer_name = data.get("customer_name") or message.from_user.full_name
     await state.update_data(customer_phone=phone, customer_name=customer_name)
 
+    # Queue-mode doctor: join the live line instead of picking a time / summary.
+    if data.get("queue_mode"):
+        await state.set_state(None)
+        try:
+            res = await api_client.join_queue({
+                "business_id": data["business_id"],
+                "staff_id": data["staff_id"],
+                "service_id": data.get("service_id"),
+                "customer_name": customer_name,
+                "customer_phone": phone,
+                "telegram_id": message.from_user.id,
+                "language": lang,
+            })
+        except Exception:
+            await message.answer(t("server_error", lang))
+            return
+        entry_id = res.get("entry_id")
+        await message.answer(
+            t("queue_ticket", lang, staff=esc(data.get("staff_name", "")),
+              pos=res.get("position"), eta=res.get("eta_minutes")),
+            parse_mode="HTML",
+            reply_markup=InlineKeyboardMarkup(inline_keyboard=[
+                [InlineKeyboardButton(text=t("queue_my_place", lang), callback_data=f"qstat_{entry_id}")],
+                [InlineKeyboardButton(text=t("queue_leave", lang), callback_data=f"qleave_{entry_id}")],
+                [InlineKeyboardButton(text=t("main_menu", lang), callback_data="main_menu")],
+            ]),
+        )
+        return
+
     price = data.get("service_price")
     price_str = (
         t("price_uzs", lang, amount=f"{int(float(price)):,}") if price else t("price_free", lang)
@@ -922,3 +966,88 @@ async def booking_confirm(callback: CallbackQuery, state: FSMContext) -> None:
     await callback.message.edit_text(
         result_text, reply_markup=InlineKeyboardMarkup(inline_keyboard=rows),
     )
+
+
+# ── Live queue: status / leave / still-coming responses ──────────────────────
+
+@router.callback_query(F.data.startswith("qstat_"))
+async def queue_my_place(callback: CallbackQuery, state: FSMContext) -> None:
+    """'My place' → show the customer their current position + wait as an alert."""
+    lang = await _lang(state)
+    try:
+        entry_id = int(callback.data.split("_", 1)[1])
+    except ValueError:
+        await callback.answer()
+        return
+    try:
+        st = await api_client.queue_status(entry_id)
+    except Exception:
+        await callback.answer(t("server_error", lang), show_alert=True)
+        return
+    if st.get("status") != "waiting":
+        await callback.answer(t("queue_not_waiting", lang), show_alert=True)
+        return
+    await callback.answer(
+        t("queue_place_alert", lang, pos=st.get("position"), eta=st.get("eta_minutes")),
+        show_alert=True,
+    )
+
+
+@router.callback_query(F.data.startswith("qleave_"))
+async def queue_leave_cb(callback: CallbackQuery, state: FSMContext) -> None:
+    await callback.answer()
+    lang = await _lang(state)
+    try:
+        entry_id = int(callback.data.split("_", 1)[1])
+    except ValueError:
+        return
+    try:
+        await api_client.queue_leave(entry_id)
+    except Exception:
+        pass
+    try:
+        await callback.message.edit_text(
+            t("queue_left", lang),
+            reply_markup=InlineKeyboardMarkup(inline_keyboard=main_menu_button(lang)),
+        )
+    except Exception:
+        pass
+
+
+@router.callback_query(F.data.startswith("q_yes_"))
+async def queue_confirm_cb(callback: CallbackQuery, state: FSMContext) -> None:
+    """Response to the backend's 'still coming?' ping — Yes."""
+    lang = await _lang(state)
+    try:
+        entry_id = int(callback.data.rsplit("_", 1)[1])
+    except ValueError:
+        await callback.answer()
+        return
+    try:
+        await api_client.queue_confirm(entry_id)
+    except Exception:
+        pass
+    await callback.answer(t("queue_confirmed", lang), show_alert=False)
+    try:
+        await callback.message.edit_reply_markup(reply_markup=None)
+    except Exception:
+        pass
+
+
+@router.callback_query(F.data.startswith("q_no_"))
+async def queue_decline_cb(callback: CallbackQuery, state: FSMContext) -> None:
+    """Response to the 'still coming?' ping — No → leave the line."""
+    await callback.answer()
+    lang = await _lang(state)
+    try:
+        entry_id = int(callback.data.rsplit("_", 1)[1])
+    except ValueError:
+        return
+    try:
+        await api_client.queue_leave(entry_id)
+    except Exception:
+        pass
+    try:
+        await callback.message.edit_text(t("queue_left", lang))
+    except Exception:
+        pass

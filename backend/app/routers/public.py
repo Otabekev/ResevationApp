@@ -125,4 +125,8 @@ async def list_public_staff(business_id: int, db: AsyncSession = Depends(get_db)
         for sid, svc_id in links.all():
             by_staff.setdefault(sid, []).append(svc_id)
 
-    return [{"id": s.id, "name": s.name, "service_ids": by_staff.get(s.id, [])} for s in staff_list]
+    return [
+        {"id": s.id, "name": s.name, "service_ids": by_staff.get(s.id, []),
+         "scheduling_mode": s.scheduling_mode}
+        for s in staff_list
+    ]

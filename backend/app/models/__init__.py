@@ -6,9 +6,11 @@ from app.models.schedule import WorkingHours, BreakTime, BlockedTime
 from app.models.booking import Booking, Customer, Notification, Review
 from app.models.subscription import AuditLog, Subscription
 from app.models.broadcast import Broadcast
+from app.models.queue import QueueEntry
 
 __all__ = [
     "Broadcast",
+    "QueueEntry",
     "User",
     "Business",
     "BusinessCategory",

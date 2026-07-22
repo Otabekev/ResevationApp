@@ -92,5 +92,13 @@
   "settings_title": "⚙️ Settings\n\nChoose your language:",
   "cancel_confirm_q": "Really cancel this booking?",
   "cancel_yes": "✅ Yes, cancel",
-  "cancel_no": "⬅️ No, go back"
+  "cancel_no": "⬅️ No, go back",
+  "queue_enter_name": "To join the live queue, enter your name:",
+  "queue_ticket": "🎫 You joined the live queue for <b>{staff}</b>!\n\nYour place: <b>#{pos}</b>\n⏳ Estimated wait: ~{eta} min\n\nWe'll let you know when your turn is near.",
+  "queue_my_place": "📍 My place",
+  "queue_leave": "❌ Leave the queue",
+  "queue_left": "You have left the queue.",
+  "queue_not_waiting": "You're not in this queue right now.",
+  "queue_place_alert": "Your place: #{pos} · ~{eta} min",
+  "queue_confirmed": "Thanks! We kept your spot in line."
 }

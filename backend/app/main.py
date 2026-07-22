@@ -28,6 +28,7 @@ from app.routers import (
     bookings,
     businesses,
     public,
+    queue,
     reviews,
     schedules,
     services,
@@ -126,6 +127,8 @@ app.include_router(analytics.router,    prefix="/api/v1")
 app.include_router(public.router,       prefix="/api/v1")
 app.include_router(admin.router,        prefix="/api/v1")
 app.include_router(invite_router,       prefix="/api/v1")
+app.include_router(queue.router,        prefix="/api/v1")
+app.include_router(queue.public_router, prefix="/api/v1")
 
 
 @app.get("/health")

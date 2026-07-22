@@ -233,6 +233,18 @@ export const createTreatmentPlan = (bizId, data) =>
   api.post(`/businesses/${bizId}/bookings/plan`, data, { timeout: 30000 }).then((r) => r.data);
 export const updateBookingStatus = (bookingId, status) =>
   api.patch(`/bookings/${bookingId}/status`, { status }).then((r) => r.data);
+
+// ── Live queue ───────────────────────────────────────────────────────────────
+export const getQueue = (bizId, staffId) =>
+  api.get(`/businesses/${bizId}/queue`, { params: staffId ? { staff_id: staffId } : {} }).then((r) => r.data);
+export const addQueueWalkin = (bizId, data) =>
+  api.post(`/businesses/${bizId}/queue`, data).then((r) => r.data);
+export const queueCall = (bizId, entryId) =>
+  api.post(`/businesses/${bizId}/queue/${entryId}/call`).then((r) => r.data);
+export const queueDone = (bizId, entryId) =>
+  api.post(`/businesses/${bizId}/queue/${entryId}/done`).then((r) => r.data);
+export const queueNoShow = (bizId, entryId) =>
+  api.post(`/businesses/${bizId}/queue/${entryId}/no_show`).then((r) => r.data);
 export const cancelBooking = (bookingId, reason) =>
   api.patch(`/bookings/${bookingId}/cancel`, { reason }).then((r) => r.data);
 
