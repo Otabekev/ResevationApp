@@ -100,8 +100,16 @@ async def list_public_staff(business_id: int, db: AsyncSession = Depends(get_db)
     biz = await db.get(Business, business_id)
     if biz is None or biz.status not in ("active", "trial"):
         return []
+    # is_provider filters out desk-managers (secretaries): they manage the desk
+    # but are not bookable, so they must never appear in the customer roster.
     result = await db.execute(
-        select(Staff).where(and_(Staff.business_id == business_id, Staff.is_active == True))
+        select(Staff).where(
+            and_(
+                Staff.business_id == business_id,
+                Staff.is_active == True,  # noqa: E712
+                Staff.is_provider == True,  # noqa: E712
+            )
+        )
     )
     staff_list = result.scalars().all()
 

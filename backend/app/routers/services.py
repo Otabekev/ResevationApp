@@ -4,7 +4,7 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.database import get_db
-from app.deps import get_current_business_owner, get_current_user
+from app.deps import authorize_business_access, get_current_dashboard_user, get_current_user
 from app.models.business import Business
 from app.models.service import Service
 from app.models.user import User
@@ -65,15 +65,8 @@ class ServiceOut(BaseModel):
     model_config = {"from_attributes": True}
 
 
-async def _get_owned_business(
-    business_id: int, user: User, db: AsyncSession
-) -> Business:
-    business = await db.get(Business, business_id)
-    if not business:
-        raise HTTPException(status_code=404, detail="Business not found")
-    if business.owner_id != user.id and user.role != "super_admin":
-        raise HTTPException(status_code=403, detail="Forbidden")
-    return business
+# All owner-facing service endpoints are manager-allowed (a desk-manager may
+# add/edit/remove services). authorize_business_access enforces per-business scope.
 
 
 @router.get("", response_model=list[ServiceOut])
@@ -89,11 +82,11 @@ async def list_services(business_id: int, db: AsyncSession = Depends(get_db)):
 @router.get("/all", response_model=list[ServiceOut])
 async def list_all_services(
     business_id: int,
-    user: User = Depends(get_current_business_owner),
+    user: User = Depends(get_current_dashboard_user),
     db: AsyncSession = Depends(get_db),
 ):
     """Owner view — includes disabled services."""
-    await _get_owned_business(business_id, user, db)
+    await authorize_business_access(business_id, user, db)
     result = await db.execute(
         select(Service).where(Service.business_id == business_id).order_by(Service.sort_order, Service.id)
     )
@@ -104,10 +97,10 @@ async def list_all_services(
 async def create_service(
     business_id: int,
     body: ServiceCreate,
-    user: User = Depends(get_current_business_owner),
+    user: User = Depends(get_current_dashboard_user),
     db: AsyncSession = Depends(get_db),
 ):
-    await _get_owned_business(business_id, user, db)
+    await authorize_business_access(business_id, user, db)
     service = Service(business_id=business_id, **body.model_dump())
     db.add(service)
     await db.commit()
@@ -120,10 +113,10 @@ async def update_service(
     business_id: int,
     service_id: int,
     body: ServiceUpdate,
-    user: User = Depends(get_current_business_owner),
+    user: User = Depends(get_current_dashboard_user),
     db: AsyncSession = Depends(get_db),
 ):
-    await _get_owned_business(business_id, user, db)
+    await authorize_business_access(business_id, user, db)
     service = await db.get(Service, service_id)
     if not service or service.business_id != business_id:
         raise HTTPException(status_code=404, detail="Service not found")
@@ -141,10 +134,10 @@ async def update_service(
 async def delete_service(
     business_id: int,
     service_id: int,
-    user: User = Depends(get_current_business_owner),
+    user: User = Depends(get_current_dashboard_user),
     db: AsyncSession = Depends(get_db),
 ):
-    await _get_owned_business(business_id, user, db)
+    await authorize_business_access(business_id, user, db)
     service = await db.get(Service, service_id)
     if not service or service.business_id != business_id:
         raise HTTPException(status_code=404, detail="Service not found")

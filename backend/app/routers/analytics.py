@@ -5,7 +5,7 @@ from sqlalchemy import and_, func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.database import get_db
-from app.deps import get_current_business_owner
+from app.deps import authorize_business_access, get_current_dashboard_user
 from app.models.booking import Booking
 from app.models.business import Business
 from app.models.service import Service
@@ -20,12 +20,10 @@ router = APIRouter(prefix="/businesses/{business_id}/analytics", tags=["analytic
 async def get_analytics(
     business_id: int,
     days: int = Query(30, ge=1, le=365),
-    user: User = Depends(get_current_business_owner),
+    user: User = Depends(get_current_dashboard_user),
     db: AsyncSession = Depends(get_db),
 ):
-    business = await db.get(Business, business_id)
-    if not business or (business.owner_id != user.id and user.role != "super_admin"):
-        raise HTTPException(status_code=403)
+    await authorize_business_access(business_id, user, db)
 
     # Local (Asia/Tashkent) "today" — date.today() is server-local (UTC on
     # Railway) and would be a day off for ~5h every night for UZ users.

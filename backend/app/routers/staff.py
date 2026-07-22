@@ -8,7 +8,13 @@ from sqlalchemy import and_, select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.database import get_db
-from app.deps import get_current_business_owner, get_current_staff, get_current_user
+from app.deps import (
+    authorize_business_access,
+    get_current_business_owner,
+    get_current_dashboard_user,
+    get_current_staff,
+    get_current_user,
+)
 from app.models.booking import Booking
 from app.models.business import Business
 from app.models.service import Service
@@ -44,6 +50,10 @@ class StaffCreate(BaseModel):
     role: str = "staff"
     can_set_own_hours: bool = False
     service_ids: list[int] = []
+    # A secretary = a manager who isn't bookable: can_manage=True, is_provider=False.
+    # can_manage is honored only when the CALLER is the owner (see add_staff).
+    can_manage: bool = False
+    is_provider: bool = True
 
 
 class StaffUpdate(BaseModel):
@@ -53,6 +63,8 @@ class StaffUpdate(BaseModel):
     role: str | None = None
     can_set_own_hours: bool | None = None
     is_active: bool | None = None
+    can_manage: bool | None = None
+    is_provider: bool | None = None
 
 
 class StaffOut(BaseModel):
@@ -65,6 +77,8 @@ class StaffOut(BaseModel):
     is_active: bool
     can_set_own_hours: bool
     is_owner: bool = False
+    can_manage: bool = False
+    is_provider: bool = True
     user_id: int | None
     service_ids: list[int] = []
 
@@ -129,10 +143,10 @@ async def _staff_list_with_services(staff_list, db: AsyncSession) -> list[StaffO
 @router.get("", response_model=list[StaffOut])
 async def list_staff(
     business_id: int,
-    user: User = Depends(get_current_business_owner),
+    user: User = Depends(get_current_dashboard_user),
     db: AsyncSession = Depends(get_db),
 ):
-    await _get_owned_business(business_id, user, db)
+    await authorize_business_access(business_id, user, db)
     result = await db.execute(select(Staff).where(Staff.business_id == business_id))
     staff_list = result.scalars().all()
     return await _staff_list_with_services(staff_list, db)
@@ -142,10 +156,13 @@ async def list_staff(
 async def add_staff(
     business_id: int,
     body: StaffCreate,
-    user: User = Depends(get_current_business_owner),
+    user: User = Depends(get_current_dashboard_user),
     db: AsyncSession = Depends(get_db),
 ):
-    await _get_owned_business(business_id, user, db)
+    business = await authorize_business_access(business_id, user, db)
+    # Only the owner (or super_admin) may DESIGNATE a manager — a desk-manager can
+    # add doctors but must not be able to mint more managers or promote herself.
+    caller_is_owner = business.owner_id == user.id or user.role == "super_admin"
 
     staff = Staff(
         business_id=business_id,
@@ -154,6 +171,8 @@ async def add_staff(
         bio=body.bio,
         role=body.role,
         can_set_own_hours=body.can_set_own_hours,
+        can_manage=(body.can_manage if caller_is_owner else False),
+        is_provider=body.is_provider,
     )
     db.add(staff)
     await db.flush()
@@ -177,7 +196,11 @@ async def add_self_as_provider(
 ):
     """Create a bookable provider profile for the owner themselves — auto-linked
     to their account (no invite needed), so they can take appointments with
-    their own schedule. One per business; separate from the business profile."""
+    their own schedule. One per business; separate from the business profile.
+
+    OWNER-ONLY (strict): this creates an is_owner=True provider linked to the
+    caller, so a manager must never reach it — hence the strict owner check, not
+    authorize_business_access."""
     await _get_owned_business(business_id, user, db)
 
     existing = await db.execute(
@@ -213,15 +236,21 @@ async def update_staff(
     business_id: int,
     staff_id: int,
     body: StaffUpdate,
-    user: User = Depends(get_current_business_owner),
+    user: User = Depends(get_current_dashboard_user),
     db: AsyncSession = Depends(get_db),
 ):
-    await _get_owned_business(business_id, user, db)
+    business = await authorize_business_access(business_id, user, db)
     staff = await db.get(Staff, staff_id)
     if not staff or staff.business_id != business_id:
         raise HTTPException(status_code=404, detail="Staff not found")
 
-    for field, value in body.model_dump(exclude_none=True).items():
+    updates = body.model_dump(exclude_none=True)
+    # Only the owner may grant/revoke manager rights — drop can_manage from a
+    # non-owner's (desk-manager's) update so she can't promote anyone (or herself).
+    caller_is_owner = business.owner_id == user.id or user.role == "super_admin"
+    if not caller_is_owner:
+        updates.pop("can_manage", None)
+    for field, value in updates.items():
         setattr(staff, field, value)
 
     db.add(staff)
@@ -235,11 +264,11 @@ async def set_staff_services(
     business_id: int,
     staff_id: int,
     service_ids: list[int],
-    user: User = Depends(get_current_business_owner),
+    user: User = Depends(get_current_dashboard_user),
     db: AsyncSession = Depends(get_db),
 ):
     """Replace the full set of services assigned to a staff member."""
-    await _get_owned_business(business_id, user, db)
+    await authorize_business_access(business_id, user, db)
     staff = await db.get(Staff, staff_id)
     if not staff or staff.business_id != business_id:
         raise HTTPException(status_code=404, detail="Staff not found")
@@ -275,7 +304,7 @@ async def set_staff_services(
 async def delete_staff(
     business_id: int,
     staff_id: int,
-    user: User = Depends(get_current_business_owner),
+    user: User = Depends(get_current_dashboard_user),
     db: AsyncSession = Depends(get_db),
 ):
     """Permanently remove a staff record. Two guards protect real data:
@@ -287,7 +316,7 @@ async def delete_staff(
 
     Cascades handled automatically by the ORM (delete-orphan) for
     staff_services / working_hours / blocked_times; invites are cleared here."""
-    await _get_owned_business(business_id, user, db)
+    await authorize_business_access(business_id, user, db)
     staff = await db.get(Staff, staff_id)
     if not staff or staff.business_id != business_id:
         raise HTTPException(status_code=404, detail="Staff not found")
@@ -336,11 +365,11 @@ async def delete_staff(
 async def create_invite(
     business_id: int,
     staff_id: int,
-    user: User = Depends(get_current_business_owner),
+    user: User = Depends(get_current_dashboard_user),
     db: AsyncSession = Depends(get_db),
 ):
     """Generate an invite link for a staff member to join via Telegram."""
-    await _get_owned_business(business_id, user, db)
+    await authorize_business_access(business_id, user, db)
     staff = await db.get(Staff, staff_id)
     if not staff or staff.business_id != business_id:
         raise HTTPException(status_code=404, detail="Staff not found")

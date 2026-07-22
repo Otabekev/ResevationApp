@@ -18,15 +18,23 @@ try:
 except Exception:  # pragma: no cover - only hit if the dependency is absent
     pass
 from pydantic import BaseModel, Field
-from sqlalchemy import func, select
+from sqlalchemy import and_, func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app import location_share_store
 from app.config import settings
 from app.database import get_db
-from app.deps import get_current_business_owner, get_current_super_admin, get_current_user
+from app.deps import (
+    authorize_business_access,
+    get_current_business_owner,
+    get_current_dashboard_user,
+    get_current_super_admin,
+    get_current_user,
+    is_business_manager,
+)
 from app.limiter import limiter
 from app.models.business import Business, BusinessCategory, BusinessPhoto
+from app.models.staff import Staff
 from app.models.user import User
 
 router = APIRouter(prefix="/businesses", tags=["businesses"])
@@ -121,6 +129,10 @@ class BusinessOut(BaseModel):
     custom_message_ru: str | None
     custom_message_en: str | None
     photo_url: str | None = None
+    # How the current user relates to this business: "owner" (full control) or
+    # "manager" (desk-manager — the frontend hides owner-only pages). Defaults to
+    # owner; set explicitly on the /mine + /{id} endpoints.
+    access_role: str = "owner"
 
     model_config = {"from_attributes": True}
 
@@ -228,26 +240,60 @@ async def register_business(
 
 @router.get("/mine", response_model=list[BusinessOut])
 async def get_my_businesses(
-    user: User = Depends(get_current_business_owner),
+    user: User = Depends(get_current_dashboard_user),
     db: AsyncSession = Depends(get_db),
 ):
-    result = await db.execute(select(Business).where(Business.owner_id == user.id))
-    return result.scalars().all()
+    """Businesses this user can act on: ones they OWN, plus ones they manage as a
+    desk-manager (secretary). Each carries access_role so the dashboard knows
+    whether to show owner-only pages."""
+    owned = (await db.execute(select(Business).where(Business.owner_id == user.id))).scalars().all()
+    out: list[BusinessOut] = []
+    seen: set[int] = set()
+    for b in owned:
+        item = BusinessOut.model_validate(b)
+        item.access_role = "owner"
+        out.append(item)
+        seen.add(b.id)
+
+    # Businesses where this user is an active desk-manager (and doesn't already
+    # own it). Managers never see owned + managed duplicates.
+    managed = (
+        await db.execute(
+            select(Business)
+            .join(Staff, Staff.business_id == Business.id)
+            .where(
+                and_(
+                    Staff.user_id == user.id,
+                    Staff.can_manage.is_(True),
+                    Staff.is_active.is_(True),
+                )
+            )
+        )
+    ).scalars().all()
+    for b in managed:
+        if b.id in seen:
+            continue
+        item = BusinessOut.model_validate(b)
+        item.access_role = "manager"
+        out.append(item)
+        seen.add(b.id)
+    return out
 
 
 @router.get("/{business_id}", response_model=BusinessOut)
 async def get_business(
     business_id: int,
-    user: User = Depends(get_current_user),
+    user: User = Depends(get_current_dashboard_user),
     db: AsyncSession = Depends(get_db),
 ):
-    """Owner/admin view of the full business record. Customers use /{id}/public."""
-    business = await db.get(Business, business_id)
-    if not business:
-        raise HTTPException(status_code=404, detail="Business not found")
+    """Owner/admin/manager view of the full business record. Customers use
+    /{id}/public. authorize_business_access allows owner, super_admin, or an
+    active desk-manager; anyone else gets 403/404."""
+    business = await authorize_business_access(business_id, user, db)
+    item = BusinessOut.model_validate(business)
     if business.owner_id != user.id and user.role != "super_admin":
-        raise HTTPException(status_code=403, detail="Forbidden")
-    return business
+        item.access_role = "manager"
+    return item
 
 
 @router.patch("/{business_id}", response_model=BusinessOut)
