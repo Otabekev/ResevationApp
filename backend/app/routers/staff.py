@@ -3,7 +3,7 @@ import secrets
 from datetime import date, datetime, timedelta, timezone
 
 from fastapi import APIRouter, Depends, HTTPException, Query, status
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 from sqlalchemy import and_, select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -54,6 +54,8 @@ class StaffCreate(BaseModel):
     # can_manage is honored only when the CALLER is the owner (see add_staff).
     can_manage: bool = False
     is_provider: bool = True
+    scheduling_mode: str = "appointments"  # "appointments" | "queue"
+    queue_avg_minutes: int = Field(15, ge=1, le=480)
 
 
 class StaffUpdate(BaseModel):
@@ -65,6 +67,8 @@ class StaffUpdate(BaseModel):
     is_active: bool | None = None
     can_manage: bool | None = None
     is_provider: bool | None = None
+    scheduling_mode: str | None = None
+    queue_avg_minutes: int | None = Field(None, ge=1, le=480)
 
 
 class StaffOut(BaseModel):
@@ -79,6 +83,8 @@ class StaffOut(BaseModel):
     is_owner: bool = False
     can_manage: bool = False
     is_provider: bool = True
+    scheduling_mode: str = "appointments"
+    queue_avg_minutes: int = 15
     user_id: int | None
     service_ids: list[int] = []
 
@@ -173,6 +179,8 @@ async def add_staff(
         can_set_own_hours=body.can_set_own_hours,
         can_manage=(body.can_manage if caller_is_owner else False),
         is_provider=body.is_provider,
+        scheduling_mode=body.scheduling_mode if body.scheduling_mode in ("appointments", "queue") else "appointments",
+        queue_avg_minutes=body.queue_avg_minutes,
     )
     db.add(staff)
     await db.flush()

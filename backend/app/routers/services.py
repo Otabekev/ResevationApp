@@ -26,6 +26,8 @@ class ServiceCreate(BaseModel):
     currency: str = Field("UZS", max_length=5)
     requires_confirmation: bool = False
     sort_order: int = Field(0, ge=0)
+    online_bookable: bool = True
+    max_per_day: int | None = Field(None, ge=1, le=1000)
 
 
 class ServiceUpdate(BaseModel):
@@ -42,6 +44,8 @@ class ServiceUpdate(BaseModel):
     is_active: bool | None = None
     requires_confirmation: bool | None = None
     sort_order: int | None = Field(None, ge=0)
+    online_bookable: bool | None = None
+    max_per_day: int | None = Field(None, ge=0, le=1000)
 
 
 class ServiceOut(BaseModel):
@@ -71,9 +75,16 @@ class ServiceOut(BaseModel):
 
 @router.get("", response_model=list[ServiceOut])
 async def list_services(business_id: int, db: AsyncSession = Depends(get_db)):
+    # Public/customer list (the bot). online_bookable=False services (e.g. a
+    # dentist's multi-day treatment) are staff-scheduled only — never self-booked
+    # — so they're hidden here. The owner dashboard uses /all (unfiltered).
     result = await db.execute(
         select(Service)
-        .where(Service.business_id == business_id, Service.is_active == True)
+        .where(
+            Service.business_id == business_id,
+            Service.is_active == True,  # noqa: E712
+            Service.online_bookable == True,  # noqa: E712
+        )
         .order_by(Service.sort_order, Service.id)
     )
     return result.scalars().all()

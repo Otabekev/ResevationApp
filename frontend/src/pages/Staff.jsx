@@ -14,7 +14,7 @@ import {
   IconTelegram, IconCheck, IconRefresh, IconTrash,
 } from "../components/icons";
 
-const EMPTY_FORM = { name: "", phone: "", bio: "", role: "staff", can_set_own_hours: false, is_active: true, can_manage: false, is_provider: true };
+const EMPTY_FORM = { name: "", phone: "", bio: "", role: "staff", can_set_own_hours: false, is_active: true, can_manage: false, is_provider: true, scheduling_mode: "appointments", queue_avg_minutes: 15 };
 
 const DEFAULT_HOURS = Array.from({ length: 7 }, (_, i) => ({
   day_of_week: i, start_time: "09:00", end_time: "18:00", is_day_off: i === 6,
@@ -68,7 +68,7 @@ export default function Staff() {
 
   const openNew = () => { setForm(EMPTY_FORM); setEditing(null); setShowModal(true); };
   const openEdit = (s) => {
-    setForm({ name: s.name, phone: s.phone || "", bio: s.bio || "", role: s.role, can_set_own_hours: s.can_set_own_hours, is_active: s.is_active, can_manage: s.can_manage, is_provider: s.is_provider });
+    setForm({ name: s.name, phone: s.phone || "", bio: s.bio || "", role: s.role, can_set_own_hours: s.can_set_own_hours, is_active: s.is_active, can_manage: s.can_manage, is_provider: s.is_provider, scheduling_mode: s.scheduling_mode || "appointments", queue_avg_minutes: s.queue_avg_minutes ?? 15 });
     setEditing(s.id);
     setShowModal(true);
   };
@@ -356,6 +356,30 @@ export default function Staff() {
                 <span className="toggle-slider"></span>
               </label>
             </div>
+
+            {/* Booking mode — only for bookable providers (not a pure secretary).
+                Appointments = pick a time; Queue = join a live line (no time). */}
+            {!form.can_manage && (
+              <div className="form-group">
+                <label>{t("scheduling_mode")}</label>
+                <select value={form.scheduling_mode} onChange={(e) => setForm({ ...form, scheduling_mode: e.target.value })}>
+                  <option value="appointments">{t("mode_appointments")}</option>
+                  <option value="queue">{t("mode_queue")}</option>
+                </select>
+                <div className="form-hint" style={{ marginTop: 2 }}>{t("scheduling_mode_hint")}</div>
+              </div>
+            )}
+
+            {!form.can_manage && form.scheduling_mode === "queue" && (
+              <div className="form-group">
+                <label>{t("queue_avg_minutes")}</label>
+                <input
+                  type="number" min="1" max="480" value={form.queue_avg_minutes}
+                  onChange={(e) => setForm({ ...form, queue_avg_minutes: parseInt(e.target.value || "15", 10) })}
+                />
+                <div className="form-hint" style={{ marginTop: 2 }}>{t("queue_avg_minutes_hint")}</div>
+              </div>
+            )}
             <div className="form-group row" style={{ justifyContent: "space-between" }}>
               <div>
                 <div style={{ fontWeight: 650, fontSize: "var(--text-sm)" }}>{t("can_set_own_hours")}</div>
