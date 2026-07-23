@@ -2,6 +2,7 @@ import { useEffect, useMemo, useState } from "react";
 import {
   getBookings, updateBookingStatus, cancelBooking,
   createManualBooking, createTreatmentPlan, getServices, getStaff, getAvailability,
+  getMyStaffProfiles,
 } from "../api/client";
 import useStore from "../store/useStore";
 import { useT } from "../i18n";
@@ -63,6 +64,10 @@ function DateStrip({ value, onChange, t }) {
 export default function Bookings() {
   const { lang, activeBusiness } = useStore();
   const t = useT(lang);
+  // A provider (doctor) uses the SAME page, but can only ever book onto their own
+  // calendar — the staff pickers are hidden and staff_id is forced to their own.
+  const isProvider = activeBusiness?.access_role === "provider";
+  const [myStaffId, setMyStaffId] = useState(null);
   const [bookings, setBookings] = useState([]);
   const [date, setDate] = useState(dayjs().format("YYYY-MM-DD"));
   const [statusFilter, setStatusFilter] = useState("");
@@ -96,7 +101,17 @@ export default function Bookings() {
   useEffect(() => {
     if (!activeBusiness) return;
     getServices(activeBusiness.id).then(setServices).catch(() => {});
-    getStaff(activeBusiness.id).then(setStaffList).catch(() => {});
+    if (isProvider) {
+      // Providers can't read the roster — use their own linked profile.
+      getMyStaffProfiles()
+        .then((profiles) => {
+          const me = profiles.find((s) => s.business_id === activeBusiness.id);
+          if (me) { setStaffList([me]); setMyStaffId(me.id); }
+        })
+        .catch(() => {});
+    } else {
+      getStaff(activeBusiness.id).then(setStaffList).catch(() => {});
+    }
   }, [activeBusiness]);
 
   // Load available slots whenever the modal's service/staff/date changes.
@@ -156,7 +171,7 @@ export default function Bookings() {
   };
 
   const openModal = () => {
-    setForm({ ...EMPTY_FORM, booking_date: date });
+    setForm({ ...EMPTY_FORM, booking_date: date, staff_id: isProvider && myStaffId ? String(myStaffId) : "" });
     setModalError("");
     setSlots(null);
     setShowModal(true);
@@ -210,7 +225,7 @@ export default function Bookings() {
 
   // ── Treatment plan (multi-day) ──────────────────────────────────────────────
   const openPlan = () => {
-    setPlan({ service_id: "", staff_id: "", customer_name: "", customer_phone: "" });
+    setPlan({ service_id: "", staff_id: isProvider && myStaffId ? String(myStaffId) : "", customer_name: "", customer_phone: "" });
     setPlanDays([{ date: dayjs().add(1, "day").format("YYYY-MM-DD"), time: "" }]);
     setPlanError("");
     setShowPlan(true);
@@ -411,15 +426,17 @@ export default function Bookings() {
               </select>
             </div>
             <div className="grid-2">
-              <div className="form-group">
-                <label>{t("staff_member")}</label>
-                <select value={form.staff_id} onChange={(e) => set("staff_id", e.target.value)}>
-                  <option value="">{t("any_available")}</option>
-                  {staffList.filter((s) => s.is_active).map((s) => (
-                    <option key={s.id} value={s.id}>{s.name}</option>
-                  ))}
-                </select>
-              </div>
+              {!isProvider && (
+                <div className="form-group">
+                  <label>{t("staff_member")}</label>
+                  <select value={form.staff_id} onChange={(e) => set("staff_id", e.target.value)}>
+                    <option value="">{t("any_available")}</option>
+                    {staffList.filter((s) => s.is_active).map((s) => (
+                      <option key={s.id} value={s.id}>{s.name}</option>
+                    ))}
+                  </select>
+                </div>
+              )}
               <div className="form-group">
                 <label>{t("date")} *</label>
                 <input
@@ -516,13 +533,15 @@ export default function Bookings() {
                   {services.map((s) => <option key={s.id} value={s.id}>{s[`name_${lang}`] || s.name_uz}</option>)}
                 </select>
               </div>
-              <div className="form-group">
-                <label>{t("staff")}</label>
-                <select value={plan.staff_id} onChange={(e) => setPlan({ ...plan, staff_id: e.target.value })}>
-                  <option value="">{t("any_staff")}</option>
-                  {staffList.filter((s) => s.is_provider !== false).map((s) => <option key={s.id} value={s.id}>{s.name}</option>)}
-                </select>
-              </div>
+              {!isProvider && (
+                <div className="form-group">
+                  <label>{t("staff")}</label>
+                  <select value={plan.staff_id} onChange={(e) => setPlan({ ...plan, staff_id: e.target.value })}>
+                    <option value="">{t("any_staff")}</option>
+                    {staffList.filter((s) => s.is_provider !== false).map((s) => <option key={s.id} value={s.id}>{s.name}</option>)}
+                  </select>
+                </div>
+              )}
             </div>
 
             <label style={{ fontWeight: 650, fontSize: "var(--text-sm)" }}>{t("plan_days")}</label>

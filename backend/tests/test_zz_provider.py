@@ -3,13 +3,32 @@ Provider self-service dashboard — a doctor's access is row-scoped to their OWN
 records: their bookings, their queue line, their hours, their setup. Never
 business-wide, never another provider's data, never business settings/roster.
 """
-from datetime import time
+from datetime import date, time, timedelta
+
+from sqlalchemy import select
 
 from app.config import settings
+from app.models.schedule import BreakTime, WorkingHours
+from app.services.booking_engine import get_available_slots
 from tests import factories as f
 
 API = "/api/v1"
 BOT = {"X-Bot-Secret": settings.bot_secret}
+
+
+async def _bookable_clinic(db, *, tid):
+    """A clinic where docA + docB are appointment providers of a shared service,
+    with business hours 09–18 every day (so availability is computable)."""
+    owner, biz, userA, userB, docA, docB = await _clinic(db, tid=tid)
+    docA.scheduling_mode = "appointments"
+    docB.scheduling_mode = "appointments"
+    svc = await f.create_service(db, business_id=biz.id, duration_minutes=30)
+    await f.link_staff_service(db, staff_id=docA.id, service_id=svc.id)
+    await f.link_staff_service(db, staff_id=docB.id, service_id=svc.id)
+    for dow in range(7):
+        db.add(WorkingHours(business_id=biz.id, day_of_week=dow, start_time=time(9, 0), end_time=time(18, 0)))
+    await db.commit()
+    return owner, biz, userA, userB, docA, docB, svc
 
 
 async def _clinic(db, *, tid):
@@ -126,3 +145,95 @@ async def test_provider_own_working_hours(client, db):
                              headers=hA)).status_code == 403
     assert (await client.put(f"{API}/businesses/{biz.id}/staff/{docB.id}/working-hours",
                              headers=hA, json=hours)).status_code == 403
+
+
+async def test_provider_analytics_self_scoped(client, db):
+    owner, biz, userA, userB, docA, docB, svc = await _bookable_clinic(db, tid=8260)
+    cust = await f.create_customer(db, telegram_id=9100)
+    today = date.today()
+    await f.create_booking(db, business_id=biz.id, service_id=svc.id, staff_id=docA.id,
+                           customer_id=cust.id, booking_date=today, start_time=time(10, 0), end_time=time(10, 30))
+    await f.create_booking(db, business_id=biz.id, service_id=svc.id, staff_id=docA.id,
+                           customer_id=cust.id, booking_date=today, start_time=time(11, 0), end_time=time(11, 30))
+    await f.create_booking(db, business_id=biz.id, service_id=svc.id, staff_id=docB.id,
+                           customer_id=cust.id, booking_date=today, start_time=time(12, 0), end_time=time(12, 30))
+    # Dr A sees only their own two; the owner sees all three.
+    rA = await client.get(f"{API}/businesses/{biz.id}/analytics?days=30", headers=f.auth_header(userA.id))
+    assert rA.status_code == 200, rA.text
+    assert rA.json()["total_bookings"] == 2
+    rO = await client.get(f"{API}/businesses/{biz.id}/analytics?days=30", headers=f.auth_header(owner.id))
+    assert rO.json()["total_bookings"] == 3
+
+
+async def test_provider_cancel_own_not_others(client, db):
+    owner, biz, userA, userB, docA, docB, svc = await _bookable_clinic(db, tid=8270)
+    cust = await f.create_customer(db, telegram_id=9200)
+    bA = await f.create_booking(db, business_id=biz.id, service_id=svc.id, staff_id=docA.id,
+                                customer_id=cust.id, booking_date=date.today(), start_time=time(10, 0),
+                                end_time=time(10, 30), status="pending")
+    bB = await f.create_booking(db, business_id=biz.id, service_id=svc.id, staff_id=docB.id,
+                                customer_id=cust.id, booking_date=date.today(), start_time=time(11, 0),
+                                end_time=time(11, 30), status="pending")
+    hA = f.auth_header(userA.id)
+    # Cannot cancel Dr B's appointment…
+    assert (await client.patch(f"{API}/bookings/{bB.id}/cancel", headers=hA, json={})).status_code == 403
+    # …but can cancel their own (Dashboard/Bookings Decline button).
+    r = await client.patch(f"{API}/bookings/{bA.id}/cancel", headers=hA, json={"reason": "sick"})
+    assert r.status_code == 200, r.text
+
+
+async def test_provider_create_booking_only_own_calendar(client, db):
+    owner, biz, userA, userB, docA, docB, svc = await _bookable_clinic(db, tid=8280)
+    hA = f.auth_header(userA.id)
+    soon = (date.today() + timedelta(days=3)).isoformat()
+    base = {"service_id": svc.id, "booking_date": soon, "start_time": "10:00:00",
+            "customer_name": "P", "customer_phone": "+998901112233"}
+    # Booking onto their OWN calendar succeeds.
+    ok = await client.post(f"{API}/businesses/{biz.id}/bookings", headers=hA, json={**base, "staff_id": docA.id})
+    assert ok.status_code == 201, ok.text
+    # Onto another doctor's calendar → 403.
+    assert (await client.post(f"{API}/businesses/{biz.id}/bookings", headers=hA,
+                              json={**base, "staff_id": docB.id, "start_time": "11:00:00"})).status_code == 403
+    # With no staff_id (would auto-assign to anyone) → 403.
+    assert (await client.post(f"{API}/businesses/{biz.id}/bookings", headers=hA,
+                              json={**base, "staff_id": None, "start_time": "12:00:00"})).status_code == 403
+
+
+async def test_provider_break_is_personal_and_honored(client, db):
+    owner, biz, userA, userB, docA, docB, svc = await _bookable_clinic(db, tid=8290)
+    hA = f.auth_header(userA.id)
+    # Dr A adds their own lunch break.
+    r = await client.post(f"{API}/businesses/{biz.id}/staff/{docA.id}/breaks", headers=hA,
+                          json={"day_of_week": None, "start_time": "13:00", "end_time": "14:00", "label": "Lunch"})
+    assert r.status_code == 200, r.text
+    row = (await db.execute(select(BreakTime).where(BreakTime.id == r.json()["id"]))).scalar_one()
+    # CRITICAL: personal row — staff_id set, business_id NULL (else it blocks EVERYONE).
+    assert row.staff_id == docA.id and row.business_id is None
+
+    # Cannot add a break to Dr B.
+    assert (await client.post(f"{API}/businesses/{biz.id}/staff/{docB.id}/breaks", headers=hA,
+                              json={"day_of_week": None, "start_time": "15:00", "end_time": "16:00"})).status_code == 403
+
+    # The engine honors it for Dr A only.
+    soon = date.today() + timedelta(days=3)
+    slotsA = await get_available_slots(db, biz.id, svc.id, soon, docA.id)
+    slotsB = await get_available_slots(db, biz.id, svc.id, soon, docB.id)
+    assert not any(time(13, 0) <= s.start_time < time(14, 0) for s in slotsA)  # A's break removed
+    assert time(13, 0) in {s.start_time for s in slotsB}                       # B unaffected
+    assert len(slotsA) < len(slotsB)
+
+
+async def test_provider_blocked_time_is_personal(client, db):
+    owner, biz, userA, userB, docA, docB, svc = await _bookable_clinic(db, tid=8300)
+    hA = f.auth_header(userA.id)
+    off = (date.today() + timedelta(days=4)).isoformat()
+    r = await client.post(f"{API}/businesses/{biz.id}/staff/{docA.id}/blocked-times", headers=hA,
+                          json={"blocked_date": off, "full_day": True, "reason": "day off"})
+    assert r.status_code == 200, r.text
+    # Cannot block Dr B's calendar.
+    assert (await client.post(f"{API}/businesses/{biz.id}/staff/{docB.id}/blocked-times", headers=hA,
+                              json={"blocked_date": off, "full_day": True})).status_code == 403
+    # Dr A's full-day block clears their slots that day; Dr B still has slots.
+    d = date.today() + timedelta(days=4)
+    assert await get_available_slots(db, biz.id, svc.id, d, docA.id) == []
+    assert len(await get_available_slots(db, biz.id, svc.id, d, docB.id)) > 0

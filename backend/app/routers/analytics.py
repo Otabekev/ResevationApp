@@ -5,7 +5,7 @@ from sqlalchemy import and_, func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.database import get_db
-from app.deps import authorize_business_access, get_current_dashboard_user
+from app.deps import authorize_business_or_provider, get_current_dashboard_user
 from app.models.booking import Booking
 from app.models.business import Business
 from app.models.service import Service
@@ -23,7 +23,11 @@ async def get_analytics(
     user: User = Depends(get_current_dashboard_user),
     db: AsyncSession = Depends(get_db),
 ):
-    await authorize_business_access(business_id, user, db)
+    # Owner/manager sees the whole business; a provider (doctor) sees only their
+    # OWN numbers — same page, self-scoped. authorize_business_or_provider returns
+    # None (whole business) or the caller's own {staff_ids}.
+    allowed = await authorize_business_or_provider(business_id, user, db)
+    staff_filter = [Booking.staff_id.in_(allowed)] if allowed is not None else []
 
     # Local (Asia/Tashkent) "today" — date.today() is server-local (UTC on
     # Railway) and would be a day off for ~5h every night for UZ users.
@@ -32,14 +36,14 @@ async def get_analytics(
     # Total bookings in period
     total = await db.scalar(
         select(func.count(Booking.id)).where(
-            and_(Booking.business_id == business_id, Booking.booking_date >= since)
+            and_(Booking.business_id == business_id, Booking.booking_date >= since, *staff_filter)
         )
     )
 
     # By status
     status_rows = await db.execute(
         select(Booking.status, func.count(Booking.id))
-        .where(and_(Booking.business_id == business_id, Booking.booking_date >= since))
+        .where(and_(Booking.business_id == business_id, Booking.booking_date >= since, *staff_filter))
         .group_by(Booking.status)
     )
     by_status = {row[0]: row[1] for row in status_rows.all()}
@@ -48,7 +52,7 @@ async def get_analytics(
     service_rows = await db.execute(
         select(Service.name_uz, func.count(Booking.id).label("count"))
         .join(Service, Service.id == Booking.service_id)
-        .where(and_(Booking.business_id == business_id, Booking.booking_date >= since))
+        .where(and_(Booking.business_id == business_id, Booking.booking_date >= since, *staff_filter))
         .group_by(Service.name_uz)
         .order_by(func.count(Booking.id).desc())
         .limit(5)
@@ -59,7 +63,7 @@ async def get_analytics(
     staff_rows = await db.execute(
         select(Staff.name, func.count(Booking.id).label("count"))
         .join(Staff, Staff.id == Booking.staff_id)
-        .where(and_(Booking.business_id == business_id, Booking.booking_date >= since))
+        .where(and_(Booking.business_id == business_id, Booking.booking_date >= since, *staff_filter))
         .group_by(Staff.name)
         .order_by(func.count(Booking.id).desc())
         .limit(5)
@@ -73,6 +77,7 @@ async def get_analytics(
             and_(
                 Booking.business_id == business_id,
                 Booking.booking_date >= now_local().date() - timedelta(days=7),
+                *staff_filter,
             )
         )
         .group_by(Booking.booking_date)

@@ -338,3 +338,115 @@ async def delete_blocked_time(
         raise HTTPException(status_code=404)
     await db.delete(bt)
     await db.commit()
+
+
+# ── Per-staff breaks + time-off (provider self-service) ───────────────────────
+# A provider manages their OWN breaks and time-off; owner/manager can manage any
+# staff member's. CRITICAL: staff-scoped rows are written with business_id=None so
+# the booking engine treats them as PERSONAL — a row with business_id also set
+# would subtract that time from EVERY provider's availability (see the apply guard
+# in booking_engine.py). Same convention as staff WorkingHours (staff_id only).
+
+async def _authorize_staff_schedule(business_id: int, staff_id: int, user: User, db: AsyncSession) -> None:
+    """Owner/manager (any staff) or a provider (their own staff_id only) may edit a
+    staff member's personal breaks / time-off. 404 unknown business/staff, 403 else."""
+    allowed = await authorize_business_or_provider(business_id, user, db)
+    staff = await db.get(Staff, staff_id)
+    if not staff or staff.business_id != business_id:
+        raise HTTPException(status_code=404, detail="Staff not found")
+    if allowed is not None and staff_id not in allowed:
+        raise HTTPException(status_code=403, detail="Forbidden")  # provider: own only
+
+
+@router.get("/businesses/{business_id}/staff/{staff_id}/breaks", response_model=list[BreakOut])
+async def get_staff_breaks(
+    business_id: int, staff_id: int,
+    user: User = Depends(get_current_dashboard_user), db: AsyncSession = Depends(get_db),
+):
+    await _authorize_staff_schedule(business_id, staff_id, user, db)
+    result = await db.execute(
+        select(BreakTime).where(BreakTime.staff_id == staff_id).order_by(BreakTime.start_time)
+    )
+    return result.scalars().all()
+
+
+@router.post("/businesses/{business_id}/staff/{staff_id}/breaks", response_model=BreakOut)
+async def add_staff_break(
+    business_id: int, staff_id: int, body: BreakCreate,
+    user: User = Depends(get_current_dashboard_user), db: AsyncSession = Depends(get_db),
+):
+    await _authorize_staff_schedule(business_id, staff_id, user, db)
+    # staff_id set + business_id NULL = personal (engine subtracts it for this staff only).
+    brk = BreakTime(staff_id=staff_id, business_id=None, **body.model_dump())
+    db.add(brk)
+    await db.commit()
+    await db.refresh(brk)
+    return brk
+
+
+@router.delete("/businesses/{business_id}/staff/{staff_id}/breaks/{break_id}", status_code=204)
+async def delete_staff_break(
+    business_id: int, staff_id: int, break_id: int,
+    user: User = Depends(get_current_dashboard_user), db: AsyncSession = Depends(get_db),
+):
+    await _authorize_staff_schedule(business_id, staff_id, user, db)
+    brk = await db.get(BreakTime, break_id)
+    if not brk or brk.staff_id != staff_id:  # ownership via staff_id (business_id is NULL here)
+        raise HTTPException(status_code=404)
+    await db.delete(brk)
+    await db.commit()
+
+
+@router.get("/businesses/{business_id}/staff/{staff_id}/blocked-times", response_model=list[BlockedTimeOut])
+async def get_staff_blocked_times(
+    business_id: int, staff_id: int, include_past: bool = False,
+    user: User = Depends(get_current_dashboard_user), db: AsyncSession = Depends(get_db),
+):
+    await _authorize_staff_schedule(business_id, staff_id, user, db)
+    from app.timeutils import now_local, to_local
+
+    filters = [BlockedTime.staff_id == staff_id]
+    if not include_past:
+        today = now_local().date()
+        filters.append(
+            (BlockedTime.blocked_date >= today) | (BlockedTime.end_datetime >= to_local(today, time.min))
+        )
+    result = await db.execute(
+        select(BlockedTime).where(and_(*filters)).order_by(
+            BlockedTime.blocked_date, BlockedTime.start_datetime
+        )
+    )
+    return result.scalars().all()
+
+
+@router.post("/businesses/{business_id}/staff/{staff_id}/blocked-times", response_model=BlockedTimeOut)
+async def add_staff_blocked_time(
+    business_id: int, staff_id: int, body: BlockedTimeCreate,
+    user: User = Depends(get_current_dashboard_user), db: AsyncSession = Depends(get_db),
+):
+    await _authorize_staff_schedule(business_id, staff_id, user, db)
+    bt = BlockedTime(
+        staff_id=staff_id, business_id=None,  # personal — see module note above
+        blocked_date=body.blocked_date,
+        start_datetime=body.start_datetime,
+        end_datetime=body.end_datetime,
+        full_day=body.full_day,
+        reason=body.reason,
+    )
+    db.add(bt)
+    await db.commit()
+    await db.refresh(bt)
+    return bt
+
+
+@router.delete("/businesses/{business_id}/staff/{staff_id}/blocked-times/{blocked_id}", status_code=204)
+async def delete_staff_blocked_time(
+    business_id: int, staff_id: int, blocked_id: int,
+    user: User = Depends(get_current_dashboard_user), db: AsyncSession = Depends(get_db),
+):
+    await _authorize_staff_schedule(business_id, staff_id, user, db)
+    bt = await db.get(BlockedTime, blocked_id)
+    if not bt or bt.staff_id != staff_id:
+        raise HTTPException(status_code=404)
+    await db.delete(bt)
+    await db.commit()

@@ -495,6 +495,22 @@ async def _resolve_manual_customer(db: AsyncSession, name: str, phone: str) -> C
     return customer
 
 
+async def _authorize_booking_write(business_id: int, body_staff_id, user: User, db: AsyncSession) -> Business:
+    """Write access for manual booking / treatment plan. Owner/manager may book any
+    staff (returns the Business for status + allow_multi_service checks). A provider
+    may ONLY create a booking assigned to their OWN staff record — a null or foreign
+    staff_id is rejected 403, so the engine can never auto-assign it to another
+    doctor (client-side forcing is not enough on its own)."""
+    allowed = await authorize_business_or_provider(business_id, user, db)
+    business = await db.get(Business, business_id)  # helper returns set|None; identity-map cached
+    if not business:
+        raise HTTPException(status_code=404, detail="Business not found")
+    if allowed is not None:  # provider — must target their own calendar
+        if not body_staff_id or body_staff_id not in allowed:
+            raise HTTPException(status_code=403, detail="A provider can only book onto their own calendar")
+    return business
+
+
 @router.post("/businesses/{business_id}/bookings", response_model=BookingOut, status_code=201)
 async def create_manual_booking(
     business_id: int,
@@ -503,7 +519,7 @@ async def create_manual_booking(
     db: AsyncSession = Depends(get_db),
 ):
     """Owner or desk-manager manually creates a booking (walk-in, phone call)."""
-    business = await authorize_business_access(business_id, user, db)
+    business = await _authorize_booking_write(business_id, body.staff_id, user, db)
     if business.status in ("suspended", "blocked"):
         raise HTTPException(status_code=409, detail="This business is not accepting bookings")
 
@@ -545,7 +561,7 @@ async def create_treatment_plan(
     were created and which couldn't be (e.g. that slot was taken), so the secretary
     can retry just the failures. The patient is linked by phone to their Telegram
     account when possible, so every reserved day sends them reminders."""
-    business = await authorize_business_access(business_id, user, db)
+    business = await _authorize_booking_write(business_id, body.staff_id, user, db)
     if business.status in ("suspended", "blocked"):
         raise HTTPException(status_code=409, detail="This business is not accepting bookings")
 
@@ -699,17 +715,27 @@ async def cancel_booking(
     customer = await db.get(Customer, booking.customer_id) if booking.customer_id else None
     is_owner = business and business.owner_id == user.id
     is_manager = await is_business_manager(booking.business_id, user, db)
+    # The provider this booking is assigned to may cancel their own appointment.
+    assigned_staff = await db.get(Staff, booking.staff_id) if booking.staff_id else None
+    is_assigned_provider = bool(
+        assigned_staff
+        and assigned_staff.user_id == user.id
+        and assigned_staff.is_provider
+        and assigned_staff.is_active
+    )
     is_customer = (
         customer
         and customer.telegram_id is not None
         and customer.telegram_id == user.telegram_id
     )
 
-    if not is_owner and not is_manager and not is_customer and user.role != "super_admin":
+    if not is_owner and not is_manager and not is_assigned_provider and not is_customer and user.role != "super_admin":
         raise HTTPException(status_code=403)
 
-    # Owner/manager/admin cancelling on the business side → cancelled_by_business.
-    cancelled_by_business_side = (is_owner or is_manager or user.role == "super_admin") and not is_customer
+    # Owner/manager/admin/assigned-provider cancelling on the business side → cancelled_by_business.
+    cancelled_by_business_side = (
+        is_owner or is_manager or is_assigned_provider or user.role == "super_admin"
+    ) and not is_customer
     booking.status = "cancelled_by_business" if cancelled_by_business_side else "cancelled_by_customer"
     booking.cancellation_reason = body.reason
     booking.cancelled_at = datetime.now(timezone.utc)

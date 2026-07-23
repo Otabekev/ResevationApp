@@ -2,6 +2,10 @@ import { useEffect, useState } from "react";
 import {
   getWorkingHours, setWorkingHours, getBreaks, addBreak, deleteBreak,
   getBlockedTimes, addBlockedTime, deleteBlockedTime,
+  getMyStaffProfiles,
+  getStaffWorkingHours, setStaffWorkingHours,
+  getStaffBreaks, addStaffBreak, deleteStaffBreak,
+  getStaffBlockedTimes, addStaffBlockedTime, deleteStaffBlockedTime,
 } from "../api/client";
 import useStore from "../store/useStore";
 import { useT } from "../i18n";
@@ -17,9 +21,16 @@ const DEFAULT_HOURS = Array.from({ length: 7 }, (_, i) => ({
   day_of_week: i, start_time: "09:00", end_time: "18:00", is_day_off: i === 6,
 }));
 
+// The SAME schedule page owners use. For a provider (doctor) every call is routed
+// to the staff-scoped variant (their own working hours + personal breaks + personal
+// time-off); owners keep editing business-wide config. The booking engine honors a
+// provider's personal break/time-off automatically (rows are staff-scoped).
 export default function Schedule() {
   const { lang, activeBusiness } = useStore();
   const t = useT(lang);
+  const isProvider = activeBusiness?.access_role === "provider";
+  const [staffId, setStaffId] = useState(null); // provider's own staff_id
+  const [noProfile, setNoProfile] = useState(false);
   const [hours, setHours] = useState(DEFAULT_HOURS);
   const [breaks, setBreaks] = useState([]);
   const [blocked, setBlocked] = useState([]);
@@ -39,10 +50,18 @@ export default function Schedule() {
   const load = async () => {
     setLoading(true);
     try {
+      let sid = staffId;
+      if (isProvider && !sid) {
+        const profiles = await getMyStaffProfiles();
+        const me = profiles.find((s) => s.business_id === activeBusiness.id);
+        if (!me) { setNoProfile(true); return; }
+        sid = me.id;
+        setStaffId(sid);
+      }
       const [wh, brk, blk] = await Promise.all([
-        getWorkingHours(activeBusiness.id),
-        getBreaks(activeBusiness.id),
-        getBlockedTimes(activeBusiness.id),
+        isProvider ? getStaffWorkingHours(activeBusiness.id, sid) : getWorkingHours(activeBusiness.id),
+        isProvider ? getStaffBreaks(activeBusiness.id, sid) : getBreaks(activeBusiness.id),
+        isProvider ? getStaffBlockedTimes(activeBusiness.id, sid) : getBlockedTimes(activeBusiness.id),
       ]);
       if (wh.length > 0) {
         setHours(DEFAULT_HOURS.map((def) => {
@@ -74,7 +93,8 @@ export default function Schedule() {
   const handleSaveHours = async () => {
     setSaving(true);
     try {
-      await setWorkingHours(activeBusiness.id, hours);
+      if (isProvider) await setStaffWorkingHours(activeBusiness.id, staffId, hours);
+      else await setWorkingHours(activeBusiness.id, hours);
       setToast({ message: t("saved"), variant: "success" });
     } catch (err) {
       setToast({ message: err.response?.data?.detail?.[0]?.msg || t("error"), variant: "error" });
@@ -85,13 +105,15 @@ export default function Schedule() {
 
   const handleAddBreak = async (e) => {
     e.preventDefault();
+    const data = {
+      day_of_week: breakForm.day_of_week === "" ? null : parseInt(breakForm.day_of_week, 10),
+      start_time: breakForm.start_time,
+      end_time: breakForm.end_time,
+      label: breakForm.label || null,
+    };
     try {
-      await addBreak(activeBusiness.id, {
-        day_of_week: breakForm.day_of_week === "" ? null : parseInt(breakForm.day_of_week, 10),
-        start_time: breakForm.start_time,
-        end_time: breakForm.end_time,
-        label: breakForm.label || null,
-      });
+      if (isProvider) await addStaffBreak(activeBusiness.id, staffId, data);
+      else await addBreak(activeBusiness.id, data);
       setBreakForm({ day_of_week: "", start_time: "13:00", end_time: "14:00", label: "" });
       setToast({ message: t("saved"), variant: "success" });
       await load();
@@ -102,7 +124,8 @@ export default function Schedule() {
 
   const handleDeleteBreak = async (id) => {
     try {
-      await deleteBreak(activeBusiness.id, id);
+      if (isProvider) await deleteStaffBreak(activeBusiness.id, staffId, id);
+      else await deleteBreak(activeBusiness.id, id);
       setBreaks((prev) => prev.filter((b) => b.id !== id));
     } catch {
       setToast({ message: t("error"), variant: "error" });
@@ -111,12 +134,10 @@ export default function Schedule() {
 
   const handleAddBlock = async (e) => {
     e.preventDefault();
+    const data = { blocked_date: blockForm.blocked_date, full_day: true, reason: blockForm.reason || null };
     try {
-      await addBlockedTime(activeBusiness.id, {
-        blocked_date: blockForm.blocked_date,
-        full_day: true,
-        reason: blockForm.reason || null,
-      });
+      if (isProvider) await addStaffBlockedTime(activeBusiness.id, staffId, data);
+      else await addBlockedTime(activeBusiness.id, data);
       setBlockForm({ blocked_date: "", reason: "" });
       setToast({ message: t("day_blocked"), variant: "success" });
       await load();
@@ -127,7 +148,8 @@ export default function Schedule() {
 
   const handleDeleteBlock = async (id) => {
     try {
-      await deleteBlockedTime(activeBusiness.id, id);
+      if (isProvider) await deleteStaffBlockedTime(activeBusiness.id, staffId, id);
+      else await deleteBlockedTime(activeBusiness.id, id);
       setBlocked((prev) => prev.filter((b) => b.id !== id));
     } catch {
       setToast({ message: t("error"), variant: "error" });
@@ -137,13 +159,16 @@ export default function Schedule() {
   if (!activeBusiness) {
     return <EmptyState icon={<IconClock size={26} />} title={t("select_business_first")} subtitle={t("select_business_desc")} />;
   }
+  if (isProvider && noProfile) {
+    return <EmptyState icon={<IconClock size={26} />} title={t("no_provider_profile")} subtitle={t("no_provider_profile_desc")} />;
+  }
 
   return (
     <div className="animate-in">
       <div className="page-header">
         <div>
           <h1 className="page-title">{t("schedule")}</h1>
-          <p className="page-subtitle">{t("schedule_subtitle")}</p>
+          <p className="page-subtitle">{isProvider ? t("my_schedule_desc") : t("schedule_subtitle")}</p>
         </div>
       </div>
 

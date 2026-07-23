@@ -217,9 +217,11 @@ export default function Dashboard() {
   const upcoming = todayBookings.filter((b) => ["pending", "confirmed"].includes(b.status));
   const svcName = (b) => b[`service_name_${lang}`] || b.service_name_uz || `#${b.service_id}`;
 
+  // A provider (doctor) has no Staff roster page — drop that quick-link.
+  const isProvider = activeBusiness?.access_role === "provider";
   const QUICK_LINKS = [
     { to: "/bookings", Icon: IconCalendar, key: "bookings" },
-    { to: "/staff", Icon: IconUsers, key: "staff" },
+    ...(isProvider ? [] : [{ to: "/staff", Icon: IconUsers, key: "staff" }]),
     { to: "/schedule", Icon: IconClock, key: "schedule" },
     { to: "/analytics", Icon: IconChart, key: "analytics" },
     ...(user?.role === "super_admin" ? [{ to: "/admin", Icon: IconShield, key: "admin" }] : []),
