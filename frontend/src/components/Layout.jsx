@@ -22,6 +22,15 @@ const NAV_ITEMS = [
   { path: "/settings", Icon: IconSettings, key: "settings", mobile: true },
 ];
 
+// A provider (doctor) manages only their OWN day, queue, hours, and setup — no
+// owner/manager pages (Services, Staff, Analytics, Settings are hidden).
+const PROVIDER_NAV_ITEMS = [
+  { path: "/", Icon: IconHome, key: "my_day", mobile: true },
+  { path: "/queue", Icon: IconClock, key: "queue", mobile: true },
+  { path: "/my-schedule", Icon: IconCalendar, key: "my_working_hours", mobile: true },
+  { path: "/my-setup", Icon: IconSettings, key: "my_setup", mobile: true },
+];
+
 // Super-admin lives in its own world: no business switcher, no owner pages.
 const ADMIN_NAV_ITEMS = [
   { path: "/", Icon: IconHome, key: "overview", mobile: true },
@@ -209,7 +218,10 @@ export default function Layout({ children }) {
   // A desk-manager (secretary) can't change business settings/storefront — hide
   // the owner-only Settings page. The backend enforces this regardless of the UI.
   const isManager = !isAdmin && activeBusiness?.access_role === "manager";
-  let allNav = isAdmin ? ADMIN_NAV_ITEMS : NAV_ITEMS;
+  // A provider (doctor) gets a self-service dashboard: their own day/queue/hours/
+  // setup only. The backend row-scopes every call regardless of the UI.
+  const isProvider = !isAdmin && activeBusiness?.access_role === "provider";
+  let allNav = isAdmin ? ADMIN_NAV_ITEMS : isProvider ? PROVIDER_NAV_ITEMS : NAV_ITEMS;
   if (isManager) allNav = allNav.filter((item) => item.path !== "/settings");
 
   return (

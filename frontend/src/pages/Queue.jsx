@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from "react";
-import { getStaff, getQueue, addQueueWalkin, queueCall, queueDone, queueNoShow } from "../api/client";
+import { getStaff, getMyStaffProfiles, getQueue, addQueueWalkin, queueCall, queueDone, queueNoShow } from "../api/client";
 import useStore from "../store/useStore";
 import { useT } from "../i18n";
 import { SkeletonList } from "../components/Skeleton";
@@ -24,7 +24,13 @@ export default function Queue() {
   const queueStaff = useMemo(() => staff.filter((s) => s.scheduling_mode === "queue"), [staff]);
 
   const loadStaff = async () => {
-    try { setStaff(await getStaff(activeBusiness.id)); } catch { /* keep old */ }
+    try {
+      // A provider can't read the roster — use their own linked profile(s) instead.
+      const list = activeBusiness.access_role === "provider"
+        ? (await getMyStaffProfiles()).filter((s) => s.business_id === activeBusiness.id)
+        : await getStaff(activeBusiness.id);
+      setStaff(list);
+    } catch { /* keep old */ }
   };
   const loadQueue = async () => {
     try { setEntries(await getQueue(activeBusiness.id)); } catch { /* keep old */ }

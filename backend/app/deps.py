@@ -110,6 +110,65 @@ async def authorize_business_access(business_id: int, user: User, db: AsyncSessi
     raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Forbidden")
 
 
+async def get_provider_staff(business_id: int, user: User, db: AsyncSession) -> list[Staff]:
+    """The active provider (bookable-doctor) Staff records this user holds in
+    `business_id`. A plain provider is scoped to THESE staff_ids only — never
+    business-wide. Empty list if the user isn't an active provider here."""
+    rows = await db.execute(
+        select(Staff).where(
+            and_(
+                Staff.business_id == business_id,
+                Staff.user_id == user.id,
+                Staff.is_provider.is_(True),
+                Staff.is_active.is_(True),
+            )
+        )
+    )
+    return list(rows.scalars().all())
+
+
+async def authorize_provider_access(business_id: int, user: User, db: AsyncSession) -> list[Staff]:
+    """THE choke point for provider self-service endpoints. Returns the user's own
+    active provider Staff record(s) in this business, or raises: 404 if the
+    business is missing, 403 if the user isn't a provider here. Callers MUST scope
+    every row they read or write to the returned staff_ids — this grants
+    self-access only, never business-wide powers (those go through
+    authorize_business_access). An owner/manager who is ALSO a provider passes
+    here too, but only ever sees their own provider rows through this path."""
+    business = await db.get(Business, business_id)
+    if not business:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Business not found")
+    staff = await get_provider_staff(business_id, user, db)
+    if not staff:
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Forbidden")
+    return staff
+
+
+async def authorize_business_or_provider(
+    business_id: int, user: User, db: AsyncSession
+) -> set[int] | None:
+    """Access for endpoints usable by BOTH managers and providers, where a
+    provider is row-scoped to their own staff records. Returns:
+      • None  → the user may act on the WHOLE business (owner / super_admin /
+                active desk-manager) — apply no staff filter.
+      • {ids} → the user is a provider; every row read or written MUST have its
+                staff_id in this set, or the caller returns 403.
+    Raises 404 if the business is missing, 403 if the user is neither. This is the
+    single place that decides 'manager-wide vs provider-own' — callers only apply
+    the returned filter."""
+    business = await db.get(Business, business_id)
+    if not business:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Business not found")
+    if business.owner_id == user.id or user.role == "super_admin":
+        return None
+    if await is_business_manager(business_id, user, db):
+        return None
+    provider = await get_provider_staff(business_id, user, db)
+    if provider:
+        return {s.id for s in provider}
+    raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Forbidden")
+
+
 async def get_current_staff(user: User = Depends(get_current_user)) -> User:
     if user.role not in ("staff", "business_owner", "super_admin"):
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Staff access required")

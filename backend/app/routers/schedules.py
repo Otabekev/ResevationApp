@@ -6,7 +6,7 @@ from sqlalchemy import and_, delete, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.database import get_db
-from app.deps import authorize_business_access, get_current_dashboard_user, get_current_user, is_business_manager
+from app.deps import authorize_business_access, authorize_business_or_provider, get_current_dashboard_user, get_current_user, is_business_manager
 from app.models.business import Business
 from app.models.schedule import BlockedTime, BreakTime, WorkingHours
 from app.models.staff import Staff
@@ -164,10 +164,12 @@ async def get_staff_hours(
     user: User = Depends(get_current_dashboard_user),
     db: AsyncSession = Depends(get_db),
 ):
-    await authorize_business_access(business_id, user, db)
+    allowed = await authorize_business_or_provider(business_id, user, db)
     staff = await db.get(Staff, staff_id)
     if not staff or staff.business_id != business_id:
         raise HTTPException(status_code=404, detail="Staff not found")
+    if allowed is not None and staff_id not in allowed:
+        raise HTTPException(status_code=403, detail="Forbidden")  # provider: own hours only
     result = await db.execute(
         select(WorkingHours).where(WorkingHours.staff_id == staff_id).order_by(WorkingHours.day_of_week)
     )
@@ -188,7 +190,9 @@ async def set_staff_hours(
 
     business = await db.get(Business, business_id)
     is_owner = business and business.owner_id == user.id
-    is_self = staff.user_id == user.id and staff.can_set_own_hours
+    # A provider manages their own hours from their dashboard; can_set_own_hours
+    # stays honored for any other self-service case.
+    is_self = staff.user_id == user.id and (staff.is_provider or staff.can_set_own_hours)
     is_manager = await is_business_manager(business_id, user, db)
     if not is_owner and not is_self and not is_manager and user.role != "super_admin":
         raise HTTPException(status_code=403, detail="Forbidden")
@@ -214,10 +218,12 @@ async def clear_staff_hours(
     db: AsyncSession = Depends(get_db),
 ):
     """Remove staff-specific hours so the member falls back to business hours."""
-    await authorize_business_access(business_id, user, db)
+    allowed = await authorize_business_or_provider(business_id, user, db)
     staff = await db.get(Staff, staff_id)
     if not staff or staff.business_id != business_id:
         raise HTTPException(status_code=404, detail="Staff not found")
+    if allowed is not None and staff_id not in allowed:
+        raise HTTPException(status_code=403, detail="Forbidden")  # provider: own hours only
     await db.execute(delete(WorkingHours).where(WorkingHours.staff_id == staff_id))
     await db.commit()
 

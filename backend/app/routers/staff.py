@@ -10,6 +10,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.database import get_db
 from app.deps import (
     authorize_business_access,
+    authorize_provider_access,
     get_current_business_owner,
     get_current_dashboard_user,
     get_current_staff,
@@ -69,6 +70,17 @@ class StaffUpdate(BaseModel):
     is_provider: bool | None = None
     scheduling_mode: str | None = None
     queue_avg_minutes: int | None = Field(None, ge=1, le=480)
+
+
+class StaffSelfUpdate(BaseModel):
+    """Fields a provider may change on their OWN record. Deliberately excludes
+    every privilege/identity field (can_manage, is_provider, is_active, is_owner,
+    role, phone) so a self-update can never escalate access or reassign a record."""
+    name: str | None = None
+    bio: str | None = None
+    scheduling_mode: str | None = None
+    queue_avg_minutes: int | None = Field(None, ge=1, le=480)
+    service_ids: list[int] | None = None
 
 
 class StaffOut(BaseModel):
@@ -260,6 +272,55 @@ async def update_staff(
         updates.pop("can_manage", None)
     for field, value in updates.items():
         setattr(staff, field, value)
+
+    db.add(staff)
+    await db.commit()
+    await db.refresh(staff)
+    return await _staff_with_services(staff, db)
+
+
+@router.patch("/me/{staff_id}", response_model=StaffOut)
+async def update_my_staff(
+    business_id: int,
+    staff_id: int,
+    body: StaffSelfUpdate,
+    user: User = Depends(get_current_dashboard_user),
+    db: AsyncSession = Depends(get_db),
+):
+    """Provider self-service: a doctor edits their OWN record — display name/bio,
+    their scheduling mode + queue speed ('what kind of queue they want'), and
+    which services they offer. Never a privilege field, never another staff
+    member's record (authorize_provider_access returns only the caller's own)."""
+    own_ids = {s.id for s in await authorize_provider_access(business_id, user, db)}
+    if staff_id not in own_ids:
+        raise HTTPException(status_code=403, detail="Forbidden")
+    staff = await db.get(Staff, staff_id)
+    if not staff or staff.business_id != business_id:
+        raise HTTPException(status_code=404, detail="Staff not found")
+
+    updates = body.model_dump(exclude_none=True)
+    service_ids = updates.pop("service_ids", None)
+    if "scheduling_mode" in updates and updates["scheduling_mode"] not in ("appointments", "queue"):
+        updates.pop("scheduling_mode")
+    for field, value in updates.items():
+        setattr(staff, field, value)
+
+    # Replace the service links if provided — diff (not delete-all-then-insert) to
+    # avoid the uq_staff_services unique-constraint flush order trap (see
+    # set_staff_services). Only services belonging to this business are added.
+    if service_ids is not None:
+        requested = set(service_ids)
+        existing_rows = (
+            await db.execute(select(StaffService).where(StaffService.staff_id == staff_id))
+        ).scalars().all()
+        current = {ss.service_id for ss in existing_rows}
+        for ss in existing_rows:
+            if ss.service_id not in requested:
+                await db.delete(ss)
+        for sid in requested - current:
+            svc = await db.get(Service, sid)
+            if svc and svc.business_id == business_id:
+                db.add(StaffService(staff_id=staff_id, service_id=sid))
 
     db.add(staff)
     await db.commit()

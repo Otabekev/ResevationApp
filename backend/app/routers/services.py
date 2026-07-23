@@ -4,7 +4,7 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.database import get_db
-from app.deps import authorize_business_access, get_current_dashboard_user, get_current_user
+from app.deps import authorize_business_access, authorize_business_or_provider, get_current_dashboard_user, get_current_user
 from app.models.business import Business
 from app.models.service import Service
 from app.models.user import User
@@ -96,8 +96,10 @@ async def list_all_services(
     user: User = Depends(get_current_dashboard_user),
     db: AsyncSession = Depends(get_db),
 ):
-    """Owner view — includes disabled services."""
-    await authorize_business_access(business_id, user, db)
+    """Full service menu incl. disabled ones. Read-only for a provider too, so
+    their setup page can pick which of these they offer (create/edit/delete stay
+    manager-only below)."""
+    await authorize_business_or_provider(business_id, user, db)
     result = await db.execute(
         select(Service).where(Service.business_id == business_id).order_by(Service.sort_order, Service.id)
     )
