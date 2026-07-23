@@ -127,6 +127,40 @@ def booking_confirmed_message(
     return "\n".join(lines)
 
 
+_PLAN_LABELS = {
+    "uz": {
+        "title": "🗓 <b>Sizga davolash rejasi tuzildi</b>",
+        "svc": "Xizmat", "count": "Jami tashriflar",
+        "foot": "Har bir sana oldidan eslatma yuboramiz. Kela olmasangiz, biz bilan bog'laning.",
+    },
+    "ru": {
+        "title": "🗓 <b>Для вас составлен план лечения</b>",
+        "svc": "Услуга", "count": "Всего визитов",
+        "foot": "Перед каждой датой пришлём напоминание. Если не сможете прийти — свяжитесь с нами.",
+    },
+    "en": {
+        "title": "🗓 <b>A treatment plan has been booked for you</b>",
+        "svc": "Service", "count": "Total visits",
+        "foot": "We'll remind you before each date. If you can't make it, please contact us.",
+    },
+}
+
+
+def treatment_plan_message(
+    lang: str, business_name: str, service_name: str, sessions: list[tuple[str, str]]
+) -> str:
+    """One up-front summary for the patient when a multi-day treatment plan is
+    reserved for them — lists every visit (date + time). `sessions` is an ordered
+    list of (date_str, time_str). Sent only when the patient has used the bot."""
+    L = _PLAN_LABELS.get(lang, _PLAN_LABELS["uz"])
+    business_name, service_name = _esc(business_name), _esc(service_name)
+    lines = [L["title"], "", f"🏪 {business_name}", f"💈 {L['svc']}: {service_name}", ""]
+    for date_str, time_str in sessions:
+        lines.append(f"📅 {date_str}  🕐 {time_str}")
+    lines += ["", f"🔢 {L['count']}: {len(sessions)}", "", L["foot"]]
+    return "\n".join(lines)
+
+
 def booking_reminder_message(
     lang: str,
     business_name: str,

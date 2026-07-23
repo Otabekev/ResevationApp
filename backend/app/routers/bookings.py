@@ -32,6 +32,7 @@ from app.services.notification_service import (
     review_prompt_message,
     send_telegram_location,
     send_telegram_message,
+    treatment_plan_message,
 )
 
 router = APIRouter(tags=["bookings"])
@@ -553,6 +554,7 @@ async def create_manual_booking(
 async def create_treatment_plan(
     business_id: int,
     body: TreatmentPlanCreate,
+    background: BackgroundTasks,
     user: User = Depends(get_current_dashboard_user),
     db: AsyncSession = Depends(get_db),
 ):
@@ -568,6 +570,13 @@ async def create_treatment_plan(
     customer = await _resolve_manual_customer(db, body.customer_name, body.customer_phone)
     await db.commit()  # persist the customer so a per-day rollback below can't lose it
     customer = await db.get(Customer, customer.id)  # fresh, live reference after commit
+    # Capture what the summary message needs NOW — the per-visit commits below expire
+    # ORM objects, and we don't want a lazy reload after the loop.
+    cust_tg = customer.telegram_id
+    cust_lang = customer.language if customer.language in ("uz", "ru", "en") else "uz"
+    biz_name = business.name
+    _svc = await db.get(Service, body.service_id)
+    plan_service_name = (getattr(_svc, f"name_{cust_lang}", None) or _svc.name_uz) if _svc else "—"
 
     service_ids = body.service_ids if business.allow_multi_service else [body.service_id]
     created, failed = [], []
@@ -593,6 +602,21 @@ async def create_treatment_plan(
         except Exception:
             await db.rollback()
             failed.append({**label, "reason": "error"})
+
+    # One up-front summary to the patient IF they've used the bot before (linked by
+    # phone) AND at least one visit was reserved — otherwise they'd only learn the
+    # dates from the per-visit reminders. Background send keeps the DB pool free.
+    if cust_tg and created:
+        visits = sorted(
+            ((c["booking_date"], c["start_time"]) for c in created),
+            key=lambda s: (s[0], s[1]),
+        )
+        pretty = [(date.fromisoformat(d).strftime("%d.%m.%Y"), tm) for d, tm in visits]
+        background.add_task(
+            send_telegram_message,
+            cust_tg,
+            treatment_plan_message(cust_lang, biz_name, plan_service_name, pretty),
+        )
 
     return {"created": created, "failed": failed}
 
