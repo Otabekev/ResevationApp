@@ -25,10 +25,24 @@ async def test_join_positions_and_eta(client, db):
         "business_id": biz.id, "staff_id": doc.id, "customer_name": "A", "telegram_id": 5001, "language": "uz"})
     assert r1.status_code == 200, r1.text
     assert r1.json()["position"] == 1 and r1.json()["eta_minutes"] == 0
+    assert r1.json()["eta_time"] is None            # front of line — no wait to show
     r2 = await client.post(f"{API}/public/queue/join", headers=BOT, json={
         "business_id": biz.id, "staff_id": doc.id, "customer_name": "B", "telegram_id": 5002})
-    assert r2.json()["position"] == 2
-    assert r2.json()["eta_minutes"] == 10  # 1 ahead × 10 min
+    body2 = r2.json()
+    assert body2["position"] == 2
+    assert body2["eta_minutes"] == 10  # 1 ahead × 10 min
+    # eta_time is a local HH:MM clock estimate (now + eta) shown next to the duration
+    assert isinstance(body2["eta_time"], str) and len(body2["eta_time"]) == 5 and body2["eta_time"][2] == ":"
+
+
+def test_eta_clock_formats_local_time():
+    from datetime import datetime
+    from app.services.queue_engine import eta_clock
+    from app.timeutils import PLATFORM_TZ
+
+    base = datetime(2026, 7, 23, 9, 0, tzinfo=PLATFORM_TZ)
+    assert eta_clock(base, 60) == "10:00"   # 9:00 + 60 min
+    assert eta_clock(base, 0) == "09:00"
 
 
 async def test_double_join_is_idempotent(client, db):
