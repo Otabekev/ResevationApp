@@ -277,6 +277,32 @@ async def get_my_businesses(
         item.access_role = "manager"
         out.append(item)
         seen.add(b.id)
+
+    # Businesses where this user is an active PROVIDER (doctor) — a self-service
+    # dashboard scoped to their own schedule/queue/setup. Lowest privilege: only
+    # added if they don't already appear as owner or manager above (which grant
+    # broader access). Without this branch a plain provider's /mine is empty and
+    # the app dead-ends them on "sign your business".
+    provided = (
+        await db.execute(
+            select(Business)
+            .join(Staff, Staff.business_id == Business.id)
+            .where(
+                and_(
+                    Staff.user_id == user.id,
+                    Staff.is_provider.is_(True),
+                    Staff.is_active.is_(True),
+                )
+            )
+        )
+    ).scalars().all()
+    for b in provided:
+        if b.id in seen:
+            continue
+        item = BusinessOut.model_validate(b)
+        item.access_role = "provider"
+        out.append(item)
+        seen.add(b.id)
     return out
 
 

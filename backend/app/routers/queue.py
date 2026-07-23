@@ -13,7 +13,7 @@ from sqlalchemy import and_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.database import get_db
-from app.deps import authorize_business_access, get_current_dashboard_user, require_bot_secret
+from app.deps import authorize_business_or_provider, get_current_dashboard_user, require_bot_secret
 from app.models.booking import Customer
 from app.models.business import Business
 from app.models.queue import QueueEntry
@@ -188,9 +188,13 @@ async def list_queue(
 ):
     """The live line(s) — waiting + currently-called entries, in order, with a
     computed position per waiting person."""
-    await authorize_business_access(business_id, user, db)
+    allowed = await authorize_business_or_provider(business_id, user, db)
     filters = [QueueEntry.business_id == business_id, QueueEntry.status.in_(("waiting", "called"))]
+    if allowed is not None:
+        filters.append(QueueEntry.staff_id.in_(allowed))  # a provider sees only their own line(s)
     if staff_id:
+        if allowed is not None and staff_id not in allowed:
+            raise HTTPException(status_code=403, detail="Forbidden")
         filters.append(QueueEntry.staff_id == staff_id)
     rows = (
         await db.execute(
@@ -219,7 +223,9 @@ async def add_walkin(
     user: User = Depends(get_current_dashboard_user), db: AsyncSession = Depends(get_db),
 ):
     """Staff adds a walk-in (someone who showed up in person) to the line."""
-    await authorize_business_access(business_id, user, db)
+    allowed = await authorize_business_or_provider(business_id, user, db)
+    if allowed is not None and body.staff_id not in allowed:
+        raise HTTPException(status_code=403, detail="Forbidden")  # provider: own line only
     staff = await _queue_staff(db, business_id, body.staff_id)
     phone = _normalize_uz_phone(body.customer_phone) if body.customer_phone else None
     entry = QueueEntry(
@@ -241,8 +247,10 @@ async def _get_entry(db: AsyncSession, business_id: int, entry_id: int) -> Queue
 
 async def _advance(db: AsyncSession, business_id: int, entry_id: int, user: User, new_status: str):
     """Shared: move an entry to a terminal/called status and return (staff, notice)."""
-    await authorize_business_access(business_id, user, db)
+    allowed = await authorize_business_or_provider(business_id, user, db)
     entry = await _get_entry(db, business_id, entry_id)
+    if allowed is not None and entry.staff_id not in allowed:
+        raise HTTPException(status_code=403, detail="Forbidden")  # provider: own patients only
     entry.status = new_status
     if new_status == "called":
         entry.called_at = datetime.now(timezone.utc)

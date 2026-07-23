@@ -9,6 +9,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.database import get_db
 from app.deps import (
     authorize_business_access,
+    authorize_business_or_provider,
     get_current_business_owner,
     get_current_dashboard_user,
     get_current_user,
@@ -392,10 +393,13 @@ async def list_bookings(
     user: User = Depends(get_current_dashboard_user),
     db: AsyncSession = Depends(get_db),
 ):
-    # Owner OR desk-manager may view this business's bookings.
-    await authorize_business_access(business_id, user, db)
+    # Owner OR desk-manager sees the whole business; a provider (doctor) sees only
+    # their own appointments, row-scoped to their staff_id.
+    allowed = await authorize_business_or_provider(business_id, user, db)
 
     filters = [Booking.business_id == business_id]
+    if allowed is not None:
+        filters.append(Booking.staff_id.in_(allowed))
     if booking_date:
         filters.append(Booking.booking_date == booking_date)
     if date_from:
@@ -405,6 +409,8 @@ async def list_bookings(
     if status_filter:
         filters.append(Booking.status == status_filter)
     if staff_id:
+        if allowed is not None and staff_id not in allowed:
+            raise HTTPException(status_code=403, detail="Forbidden")
         filters.append(Booking.staff_id == staff_id)
 
     result = await db.execute(

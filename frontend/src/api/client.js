@@ -191,6 +191,11 @@ export const unlinkStaff = (bizId, staffId) =>
   api.post(`/businesses/${bizId}/staff/${staffId}/unlink`).then((r) => r.data);
 export const createStaffInvite = (bizId, staffId) =>
   api.post(`/businesses/${bizId}/staff/${staffId}/invite`).then((r) => r.data);
+// Provider self-service: the caller's own linked staff profiles (all businesses),
+// and a scoped update of their OWN record (name/bio/mode/queue speed/services).
+export const getMyStaffProfiles = () => api.get("/staff/me").then((r) => r.data);
+export const updateMyStaff = (bizId, staffId, data) =>
+  api.patch(`/businesses/${bizId}/staff/me/${staffId}`, data, { retryable: true }).then((r) => r.data);
 
 // ── Schedule ──────────────────────────────────────────────────────────────────
 export const getWorkingHours = (bizId) =>
