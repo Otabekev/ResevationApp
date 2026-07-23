@@ -95,6 +95,66 @@ async def test_treatment_plan_reserves_several_days(client, db):
     assert r.json()["failed"] == []
 
 
+async def test_treatment_plan_notifies_bot_patient(client, db, monkeypatch):
+    """A patient who has used the bot gets ONE up-front summary listing all visits."""
+    owner, biz, svc, staff = await _bookable(db, tid=7706)
+    await f.create_customer(db, telegram_id=7007, name="Aziz", phone="+998901234567")
+
+    sent = []
+    import app.routers.bookings as bk
+
+    async def _capture(chat_id, text, **kw):
+        sent.append((chat_id, text))
+    monkeypatch.setattr(bk, "send_telegram_message", _capture)
+
+    d1 = date.today() + timedelta(days=2)
+    d2 = date.today() + timedelta(days=4)
+    s1 = await get_available_slots(db, biz.id, svc.id, d1, staff.id)
+    s2 = await get_available_slots(db, biz.id, svc.id, d2, staff.id)
+    r = await client.post(
+        f"{API}/businesses/{biz.id}/bookings/plan",
+        json={
+            "service_id": svc.id, "staff_id": staff.id,
+            "customer_name": "Aziz", "customer_phone": "998 90 123 45 67",
+            "slots": [
+                {"booking_date": str(d1), "start_time": str(s1[0].start_time)},
+                {"booking_date": str(d2), "start_time": str(s2[0].start_time)},
+            ],
+        },
+        headers=f.auth_header(owner.id),
+    )
+    assert r.status_code == 200, r.text
+    assert len(r.json()["created"]) == 2
+    # Exactly one summary, to the patient's Telegram, listing both dates.
+    assert len(sent) == 1
+    chat_id, text = sent[0]
+    assert chat_id == 7007
+    assert d1.strftime("%d.%m.%Y") in text and d2.strftime("%d.%m.%Y") in text
+
+
+async def test_treatment_plan_no_message_for_walkin(client, db, monkeypatch):
+    """A pure walk-in (never used the bot) gets no summary — nothing to send to."""
+    owner, biz, svc, staff = await _bookable(db, tid=7708)
+    sent = []
+    import app.routers.bookings as bk
+
+    async def _capture(chat_id, text, **kw):
+        sent.append((chat_id, text))
+    monkeypatch.setattr(bk, "send_telegram_message", _capture)
+
+    d1 = date.today() + timedelta(days=2)
+    s1 = await get_available_slots(db, biz.id, svc.id, d1, staff.id)
+    r = await client.post(
+        f"{API}/businesses/{biz.id}/bookings/plan",
+        json={"service_id": svc.id, "staff_id": staff.id,
+              "customer_name": "Walkin", "customer_phone": "998907778899",
+              "slots": [{"booking_date": str(d1), "start_time": str(s1[0].start_time)}]},
+        headers=f.auth_header(owner.id),
+    )
+    assert r.status_code == 200, r.text
+    assert sent == []
+
+
 async def test_treatment_plan_manager_scoped(client, db):
     """A manager of another clinic can't create a plan here (cross-tenant)."""
     owner, biz, svc, staff = await _bookable(db, tid=7705)
