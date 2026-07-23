@@ -12,9 +12,7 @@ import Login from "./pages/Login";
 const Dashboard = lazy(() => import("./pages/Dashboard"));
 const Bookings = lazy(() => import("./pages/Bookings"));
 const Queue = lazy(() => import("./pages/Queue"));
-const MyDay = lazy(() => import("./pages/MyDay"));
 const MySetup = lazy(() => import("./pages/MySetup"));
-const MySchedule = lazy(() => import("./pages/MySchedule"));
 const Services = lazy(() => import("./pages/Services"));
 const Staff = lazy(() => import("./pages/Staff"));
 const Schedule = lazy(() => import("./pages/Schedule"));
@@ -100,8 +98,6 @@ export default function App() {
   }
 
   const isAdmin = user?.role === "super_admin";
-  // A provider (doctor) lands on their own self-service dashboard, not the owner's.
-  const isProvider = activeBusiness?.access_role === "provider";
 
   return (
     <BrowserRouter>
@@ -121,10 +117,9 @@ export default function App() {
             </Routes>
           ) : (
             <Routes>
-              <Route path="/" element={isProvider ? <MyDay /> : <Dashboard />} />
+              <Route path="/" element={<Dashboard />} />
               <Route path="/bookings" element={<Bookings />} />
               <Route path="/queue" element={<Queue />} />
-              <Route path="/my-schedule" element={<MySchedule />} />
               <Route path="/my-setup" element={<MySetup />} />
               <Route path="/services" element={<Services />} />
               <Route path="/staff" element={<Staff />} />

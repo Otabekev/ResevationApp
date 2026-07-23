@@ -55,6 +55,9 @@ function Donut({ byStatus, total, t }) {
 export default function Analytics() {
   const { lang, activeBusiness } = useStore();
   const t = useT(lang);
+  // For a provider the numbers are self-scoped server-side; "Top staff" would
+  // collapse to a single self row, so hide that one comparative widget.
+  const isProvider = activeBusiness?.access_role === "provider";
   const [data, setData] = useState(null);
   const [error, setError] = useState(false);
   const [days, setDays] = useState(30);
@@ -186,8 +189,8 @@ export default function Analytics() {
           </div>
         )}
 
-        {/* Top staff */}
-        {data.top_staff.length > 0 && (
+        {/* Top staff — hidden for a provider (self-only, one row) */}
+        {!isProvider && data.top_staff.length > 0 && (
           <div className="card">
             <div className="row" style={{ gap: 10, marginBottom: "var(--space-3)" }}>
               <span className="stat-icon honey" aria-hidden><IconUsers size={16} /></span>

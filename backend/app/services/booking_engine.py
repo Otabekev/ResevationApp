@@ -560,12 +560,16 @@ async def get_available_slots(
         # Build free intervals starting from working window
         free = [window]
 
+        # Subtract breaks/blocks that apply to THIS staff. Business-wide rows
+        # (staff_id NULL) affect everyone; a personal row (staff_id set) affects
+        # only its own staff. The `sid is None` guard means a row that somehow has
+        # BOTH ids set can never leak a doctor's personal break to the whole shop.
         for iv, bid, sid in break_items:
-            if bid == business_id or sid == staff.id:
+            if (sid is None and bid == business_id) or sid == staff.id:
                 free = _subtract_interval(free, iv.start, iv.end)
 
         for iv, bid, sid in blocked_items:
-            if bid == business_id or sid == staff.id:
+            if (sid is None and bid == business_id) or sid == staff.id:
                 free = _subtract_interval(free, iv.start, iv.end)
 
         for booking_iv in bookings_by_staff.get(staff.id, []):

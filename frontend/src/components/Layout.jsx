@@ -25,9 +25,11 @@ const NAV_ITEMS = [
 // A provider (doctor) manages only their OWN day, queue, hours, and setup — no
 // owner/manager pages (Services, Staff, Analytics, Settings are hidden).
 const PROVIDER_NAV_ITEMS = [
-  { path: "/", Icon: IconHome, key: "my_day", mobile: true },
+  { path: "/", Icon: IconHome, key: "dashboard", mobile: true },
+  { path: "/bookings", Icon: IconCalendar, key: "bookings", mobile: true },
   { path: "/queue", Icon: IconClock, key: "queue", mobile: true },
-  { path: "/my-schedule", Icon: IconCalendar, key: "my_working_hours", mobile: true },
+  { path: "/schedule", Icon: IconClock, key: "schedule", mobile: false },
+  { path: "/analytics", Icon: IconChart, key: "analytics", mobile: true },
   { path: "/my-setup", Icon: IconSettings, key: "my_setup", mobile: true },
 ];
 

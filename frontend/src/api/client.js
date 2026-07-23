@@ -208,6 +208,20 @@ export const setStaffWorkingHours = (bizId, staffId, hours) =>
   api.put(`/businesses/${bizId}/staff/${staffId}/working-hours`, { hours }, { retryable: true }).then((r) => r.data);
 export const clearStaffWorkingHours = (bizId, staffId) =>
   api.delete(`/businesses/${bizId}/staff/${staffId}/working-hours`, { retryable: true });
+// Per-staff (provider self-service) breaks + time-off. A provider edits their own;
+// owner/manager can edit any staff's. Rows are personal (business_id NULL server-side).
+export const getStaffBreaks = (bizId, staffId) =>
+  api.get(`/businesses/${bizId}/staff/${staffId}/breaks`).then((r) => r.data);
+export const addStaffBreak = (bizId, staffId, data) =>
+  api.post(`/businesses/${bizId}/staff/${staffId}/breaks`, data).then((r) => r.data);
+export const deleteStaffBreak = (bizId, staffId, breakId) =>
+  api.delete(`/businesses/${bizId}/staff/${staffId}/breaks/${breakId}`);
+export const getStaffBlockedTimes = (bizId, staffId) =>
+  api.get(`/businesses/${bizId}/staff/${staffId}/blocked-times`).then((r) => r.data);
+export const addStaffBlockedTime = (bizId, staffId, data) =>
+  api.post(`/businesses/${bizId}/staff/${staffId}/blocked-times`, data).then((r) => r.data);
+export const deleteStaffBlockedTime = (bizId, staffId, btId) =>
+  api.delete(`/businesses/${bizId}/staff/${staffId}/blocked-times/${btId}`);
 export const getBreaks = (bizId) => api.get(`/businesses/${bizId}/breaks`).then((r) => r.data);
 export const addBreak = (bizId, data) =>
   api.post(`/businesses/${bizId}/breaks`, data).then((r) => r.data);
