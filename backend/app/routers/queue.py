@@ -21,14 +21,26 @@ from app.models.staff import Staff
 from app.models.user import User
 from app.routers.bookings import _normalize_uz_phone
 from app.services.notification_service import (
-    queue_joined_message, queue_next_message, queue_turn_message, send_telegram_message,
+    queue_still_coming, queue_turn_message, send_telegram_message,
 )
-from app.services.queue_engine import eta_minutes, front_waiting, position_of
+from app.services.queue_engine import eta_clock, eta_minutes, front_waiting, position_of
+from app.timeutils import now_local
 
 logger = logging.getLogger("rezerv.queue")
 
 public_router = APIRouter(prefix="/public/queue", tags=["queue"])
 router = APIRouter(prefix="/businesses/{business_id}/queue", tags=["queue"])
+
+
+def _eta_fields(position: int, avg_minutes: int) -> dict:
+    """position → {eta_minutes, eta_time}. The wall-clock estimate is only
+    meaningful when someone is ahead; for the person at the front there's no wait
+    to project, so eta_time is None and the bot shows no wait line."""
+    eta = eta_minutes(position, avg_minutes)
+    return {
+        "eta_minutes": eta,
+        "eta_time": eta_clock(now_local(), eta) if position > 1 else None,
+    }
 
 
 async def _queue_staff(db: AsyncSession, business_id: int, staff_id: int) -> Staff:
@@ -39,16 +51,20 @@ async def _queue_staff(db: AsyncSession, business_id: int, staff_id: int) -> Sta
 
 
 async def _front_notice(db: AsyncSession, staff: Staff):
-    """After the line advances, mark the new #1 as notified (in-request DB write)
-    and RETURN the (chat_id, text) to push in the background — or None."""
+    """After the line advances, tell the NEW front person their turn is near — a
+    single 'you're next — still coming?' with Yes/No buttons. Marks them notified
+    (in-request DB write) so the periodic sweep never asks again. Returns
+    (chat_id, text, markup) to push in the background — or None."""
     fronts = await front_waiting(db, staff.id, limit=1)
     if not fronts:
         return None
     top = fronts[0]
     if top.telegram_id and top.notified_position != 1:
         top.notified_position = 1
+        top.last_ping_at = datetime.now(timezone.utc)  # so the sweep won't re-ask
         db.add(top)
-        return (top.telegram_id, queue_next_message(top.language, staff.name))
+        text, markup = queue_still_coming(top.language, staff.name, top.id)
+        return (top.telegram_id, text, markup)
     return None
 
 
@@ -89,7 +105,7 @@ async def join_queue(body: QueueJoin, db: AsyncSession = Depends(get_db)):
         ).scalar_one_or_none()
         if dup is not None:
             pos = await position_of(db, dup)
-            return {"entry_id": dup.id, "position": pos, "eta_minutes": eta_minutes(pos, staff.queue_avg_minutes),
+            return {"entry_id": dup.id, "position": pos, **_eta_fields(pos, staff.queue_avg_minutes),
                     "staff_name": staff.name, "already": True}
 
     customer_id = None
@@ -111,7 +127,7 @@ async def join_queue(body: QueueJoin, db: AsyncSession = Depends(get_db)):
     await db.commit()
     await db.refresh(entry)
     pos = await position_of(db, entry)
-    return {"entry_id": entry.id, "position": pos, "eta_minutes": eta_minutes(pos, staff.queue_avg_minutes),
+    return {"entry_id": entry.id, "position": pos, **_eta_fields(pos, staff.queue_avg_minutes),
             "staff_name": staff.name, "already": False}
 
 
@@ -123,7 +139,7 @@ async def queue_status(entry_id: int, db: AsyncSession = Depends(get_db)):
     staff = await db.get(Staff, entry.staff_id)
     pos = await position_of(db, entry)
     return {"entry_id": entry.id, "status": entry.status, "position": pos,
-            "eta_minutes": eta_minutes(pos, staff.queue_avg_minutes if staff else 15),
+            **_eta_fields(pos, staff.queue_avg_minutes if staff else 15),
             "staff_name": staff.name if staff else ""}
 
 
@@ -141,7 +157,7 @@ async def leave_queue(entry_id: int, background: BackgroundTasks, db: AsyncSessi
     notice = await _front_notice(db, staff) if staff else None
     await db.commit()
     if notice:
-        background.add_task(send_telegram_message, notice[0], notice[1])
+        background.add_task(send_telegram_message, notice[0], notice[1], reply_markup=notice[2])
     return {"ok": True}
 
 
@@ -249,7 +265,7 @@ async def call_entry(
     if turn:
         background.add_task(send_telegram_message, turn[0], turn[1])
     if notice:
-        background.add_task(send_telegram_message, notice[0], notice[1])
+        background.add_task(send_telegram_message, notice[0], notice[1], reply_markup=notice[2])
     return {"ok": True}
 
 
@@ -261,7 +277,7 @@ async def done_entry(
     _entry, _staff, notice = await _advance(db, business_id, entry_id, user, "done")
     await db.commit()
     if notice:
-        background.add_task(send_telegram_message, notice[0], notice[1])
+        background.add_task(send_telegram_message, notice[0], notice[1], reply_markup=notice[2])
     return {"ok": True}
 
 
@@ -273,5 +289,5 @@ async def no_show_entry(
     _entry, _staff, notice = await _advance(db, business_id, entry_id, user, "no_show")
     await db.commit()
     if notice:
-        background.add_task(send_telegram_message, notice[0], notice[1])
+        background.add_task(send_telegram_message, notice[0], notice[1], reply_markup=notice[2])
     return {"ok": True}

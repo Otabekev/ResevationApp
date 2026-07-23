@@ -260,7 +260,7 @@ _QUEUE_LABELS = {
         "wait": "\n⏳ Taxminiy kutish: ~{eta} daqiqa",
         "next": "🔔 Siz <b>{staff}</b> navbatida <b>keyingisiz</b>. Iltimos, tayyor turing.",
         "turn": "✅ <b>Sizning navbatingiz!</b>\n<b>{staff}</b>ga o'ting.",
-        "ping": "🕐 Siz hali ham <b>{staff}</b> navbatidasiz (o'rningiz #{pos}).\nHali ham kelyapsizmi?",
+        "ping": "🔔 <b>{staff}</b> qabuliga navbatingiz keldi — siz keyingisiz!\nHali ham kelyapsizmi?",
         "dropped": "Siz <b>{staff}</b> navbatidan chiqarildingiz.",
         "yes": "✅ Ha, kelyapman", "no": "❌ Yo'q, bekor",
     },
@@ -269,7 +269,7 @@ _QUEUE_LABELS = {
         "wait": "\n⏳ Примерное ожидание: ~{eta} мин",
         "next": "🔔 Вы <b>следующий</b> в очереди к <b>{staff}</b>. Будьте готовы.",
         "turn": "✅ <b>Ваша очередь!</b>\nПройдите к <b>{staff}</b>.",
-        "ping": "🕐 Вы всё ещё в очереди к <b>{staff}</b> (место #{pos}).\nВы ещё придёте?",
+        "ping": "🔔 Подходит ваша очередь к <b>{staff}</b> — вы следующий!\nВы ещё придёте?",
         "dropped": "Вы были удалены из очереди к <b>{staff}</b>.",
         "yes": "✅ Да, приду", "no": "❌ Нет, отменить",
     },
@@ -278,7 +278,7 @@ _QUEUE_LABELS = {
         "wait": "\n⏳ Estimated wait: ~{eta} min",
         "next": "🔔 You're <b>next</b> in line for <b>{staff}</b>. Please be ready.",
         "turn": "✅ <b>It's your turn!</b>\nPlease come to <b>{staff}</b>.",
-        "ping": "🕐 You're still in line for <b>{staff}</b> (place #{pos}).\nAre you still coming?",
+        "ping": "🔔 You're next in line for <b>{staff}</b>!\nAre you still coming?",
         "dropped": "You were removed from the line for <b>{staff}</b>.",
         "yes": "✅ Yes, coming", "no": "❌ No, cancel",
     },
@@ -309,11 +309,12 @@ def queue_dropped_message(lang: str, staff_name: str) -> str:
     return _ql(lang)["dropped"].format(staff=_esc(staff_name))
 
 
-def queue_still_coming(lang: str, staff_name: str, position: int, entry_id: int) -> tuple[str, dict]:
-    """Returns (text, inline_keyboard dict) for the 'still coming?' ping. The bot
-    handles the q_yes_/q_no_ callbacks and calls the confirm/leave endpoints."""
+def queue_still_coming(lang: str, staff_name: str, entry_id: int) -> tuple[str, dict]:
+    """Returns (text, inline_keyboard dict) for the single 'you're next — still
+    coming?' prompt, sent once when a person reaches the front of the line. The
+    bot handles the q_yes_/q_no_ callbacks (confirm / leave)."""
     L = _ql(lang)
-    text = L["ping"].format(staff=_esc(staff_name), pos=position)
+    text = L["ping"].format(staff=_esc(staff_name))
     markup = {
         "inline_keyboard": [[
             {"text": L["yes"], "callback_data": f"q_yes_{entry_id}"},

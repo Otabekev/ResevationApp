@@ -395,9 +395,11 @@ async def create_invite(
     )
 
     token = secrets.token_urlsafe(32)
-    # Short window (48h) — an invite is meant to be tapped promptly; a long-lived
-    # link is just a bigger forwarding target.
-    expires_at = datetime.now(timezone.utc) + timedelta(hours=48)
+    # 7 days — matches what the dashboard tells the owner ("valid for 7 days").
+    # Staff often join on their next shift, so a 48h window silently expired and
+    # looked like "the link doesn't work". Safe to keep open: the invite is
+    # single-use, voided on redemption, and phone-locked to the staff record.
+    expires_at = datetime.now(timezone.utc) + timedelta(days=7)
     invite = StaffInvite(
         business_id=business_id,
         staff_id=staff_id,

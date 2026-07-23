@@ -309,23 +309,20 @@ async def _purge_old_notifications_safe() -> None:
 
 
 # ── Live-queue maintenance ────────────────────────────────────────────────────
-# Only touches the FRONT few waiting people of each line who have Telegram — a
-# tiny, bounded query — so it stays cheap no matter how idle the platform is.
-_QUEUE_PING_STALE_MIN = 4   # re-ask "still coming?" once a ping is this old
-_QUEUE_MAX_MISSES = 2       # drop after this many unanswered pings
-_QUEUE_FRONT_N = 3          # only ping the front of each line
+# Tells the FRONT (#1) person of each line, exactly ONCE, that they're next — a
+# single "you're next, still coming?" courtesy. It never re-asks (guarded by
+# notified_position) and never auto-drops anyone: no-shows are handled at the
+# desk (Call → No-show), so the bot never nags a waiting patient and never sends
+# a "you were removed" message (which could spark an argument at the front desk).
+# Bounded to one row per line, so it stays cheap no matter how idle the platform.
 
 
 async def _queue_maintenance() -> None:
     from app.models.queue import QueueEntry
     from app.models.staff import Staff
-    from app.services.notification_service import (
-        queue_dropped_message, queue_next_message, queue_still_coming,
-    )
-    from app.services.queue_engine import front_waiting
+    from app.services.notification_service import queue_still_coming
 
     now = datetime.now(timezone.utc)
-    stale_before = now - timedelta(minutes=_QUEUE_PING_STALE_MIN)
     async with AsyncSessionLocal() as db:
         rows = (
             await db.execute(
@@ -334,55 +331,34 @@ async def _queue_maintenance() -> None:
                 .order_by(QueueEntry.staff_id, QueueEntry.id)
             )
         ).scalars().all()
-        # Take the front N per line (by join order) that are due for a ping.
-        seen: dict[int, int] = {}
-        due: list[tuple] = []  # (entry, position)
+        # The front-most (#1) waiting person of each line who hasn't been told
+        # they're next yet. First row per staff_id = position 1 (ordered by id).
+        seen: set[int] = set()
+        fronts: list[QueueEntry] = []
         for e in rows:
-            n = seen.get(e.staff_id, 0)
-            if n >= _QUEUE_FRONT_N:
+            if e.staff_id in seen:
                 continue
-            seen[e.staff_id] = n + 1
-            if e.last_ping_at is not None and e.last_ping_at > stale_before:
-                continue  # pinged recently — leave them alone
-            due.append((e, n + 1))
-        if not due:
+            seen.add(e.staff_id)
+            if e.notified_position != 1:
+                fronts.append(e)
+        if not fronts:
             return
 
-        staff_ids = {e.staff_id for e, _ in due}
+        staff_ids = {e.staff_id for e in fronts}
         staff_map = {
             s.id: s
             for s in (await db.execute(select(Staff).where(Staff.id.in_(staff_ids)))).scalars().all()
         }
         sends: list[tuple] = []       # (chat_id, text, markup)
-        dropped_staff: set[int] = set()
-        for entry, position in due:
+        for entry in fronts:
             staff = staff_map.get(entry.staff_id)
             if not staff:
                 continue
-            if entry.ping_misses >= _QUEUE_MAX_MISSES:
-                entry.status = "no_show"
-                entry.finished_at = now
-                db.add(entry)
-                sends.append((entry.telegram_id, queue_dropped_message(entry.language, staff.name), None))
-                dropped_staff.add(entry.staff_id)
-            else:
-                text, markup = queue_still_coming(entry.language, staff.name, position, entry.id)
-                entry.last_ping_at = now
-                entry.ping_misses += 1
-                db.add(entry)
-                sends.append((entry.telegram_id, text, markup))
-        await db.commit()
-
-        # A drop advances its line — tell the new #1 they're next.
-        for sid in dropped_staff:
-            staff = staff_map.get(sid)
-            if not staff:
-                continue
-            fronts = await front_waiting(db, sid, 1)
-            if fronts and fronts[0].telegram_id and fronts[0].notified_position != 1:
-                fronts[0].notified_position = 1
-                db.add(fronts[0])
-                sends.append((fronts[0].telegram_id, queue_next_message(fronts[0].language, staff.name), None))
+            text, markup = queue_still_coming(entry.language, staff.name, entry.id)
+            entry.notified_position = 1   # ask exactly once
+            entry.last_ping_at = now
+            db.add(entry)
+            sends.append((entry.telegram_id, text, markup))
         await db.commit()
 
         for chat_id, text, markup in sends:
@@ -444,8 +420,9 @@ def start_scheduler() -> None:
         max_instances=1,
         misfire_grace_time=3600,
     )
-    # Live-queue "still coming?" pings + drop of non-responders. Every 3 min; the
-    # query is bounded to the front of each line, so it's cheap even at idle.
+    # Live-queue: tell each line's front person once that they're next. Every
+    # 3 min; the query is bounded to the front of each line, so it's cheap even
+    # at idle. No auto-drop — the desk handles no-shows.
     scheduler.add_job(
         _queue_maintenance_safe,
         "interval",

@@ -94,11 +94,13 @@
   "cancel_yes": "✅ Ha, bekor qilish",
   "cancel_no": "⬅️ Yo'q, ortga",
   "queue_enter_name": "Jonli navbatga yozilish uchun ismingizni yozing:",
-  "queue_ticket": "🎫 Siz <b>{staff}</b> jonli navbatiga qo'shildingiz!\n\nSizning o'rningiz: <b>#{pos}</b>\n⏳ Taxminiy kutish: ~{eta} daqiqa\n\nNavbatingiz yaqinlashganda xabar beramiz.",
+  "queue_ticket": "🎫 Siz <b>{staff}</b> jonli navbatiga qo'shildingiz!\n\nSizning o'rningiz: <b>#{pos}</b>{wait}\n\nNavbatingiz yaqinlashganda xabar beramiz.",
+  "queue_wait_line": "\n⏳ Taxminiy kutish: ~{eta} daqiqa · taxminan soat <b>{eta_time}</b> da",
   "queue_my_place": "📍 Mening o'rnim",
   "queue_leave": "❌ Navbatdan chiqish",
   "queue_left": "Siz navbatdan chiqdingiz.",
   "queue_not_waiting": "Siz hozir bu navbatda emassiz.",
-  "queue_place_alert": "Sizning o'rningiz: #{pos} · ~{eta} daqiqa",
+  "queue_place_alert": "Sizning o'rningiz: #{pos} · ~{eta} daqiqa (~{eta_time})",
+  "queue_place_alert_front": "Siz navbatda birinchisiz — tez orada chaqirishadi! 🎉",
   "queue_confirmed": "Rahmat! Sizni navbatda saqlab qoldik."
 }

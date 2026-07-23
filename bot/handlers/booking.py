@@ -857,9 +857,16 @@ async def phone_entered(message: Message, state: FSMContext) -> None:
             await message.answer(t("server_error", lang))
             return
         entry_id = res.get("entry_id")
+        pos = res.get("position") or 1
+        # Show the wait only when someone's ahead — with BOTH the duration and the
+        # estimated clock time (from the backend, in Tashkent time), so "~60 min"
+        # is never misread. The person at the front gets no wait line.
+        wait_line = ""
+        if pos > 1:
+            wait_line = t("queue_wait_line", lang,
+                          eta=res.get("eta_minutes") or 0, eta_time=res.get("eta_time") or "—")
         await message.answer(
-            t("queue_ticket", lang, staff=esc(data.get("staff_name", "")),
-              pos=res.get("position"), eta=res.get("eta_minutes")),
+            t("queue_ticket", lang, staff=esc(data.get("staff_name", "")), pos=pos, wait=wait_line),
             parse_mode="HTML",
             reply_markup=InlineKeyboardMarkup(inline_keyboard=[
                 [InlineKeyboardButton(text=t("queue_my_place", lang), callback_data=f"qstat_{entry_id}")],
@@ -987,10 +994,13 @@ async def queue_my_place(callback: CallbackQuery, state: FSMContext) -> None:
     if st.get("status") != "waiting":
         await callback.answer(t("queue_not_waiting", lang), show_alert=True)
         return
-    await callback.answer(
-        t("queue_place_alert", lang, pos=st.get("position"), eta=st.get("eta_minutes")),
-        show_alert=True,
-    )
+    pos = st.get("position") or 0
+    if pos > 1 and st.get("eta_time"):
+        msg = t("queue_place_alert", lang, pos=pos,
+                eta=st.get("eta_minutes") or 0, eta_time=st.get("eta_time"))
+    else:
+        msg = t("queue_place_alert_front", lang)
+    await callback.answer(msg, show_alert=True)
 
 
 @router.callback_query(F.data.startswith("qleave_"))
