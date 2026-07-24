@@ -46,3 +46,8 @@ Thumbs.db
 # Docker volumes
 postgres_data/
 redis_data/
+
+# Local tooling / private working notes (kept out of the public repo)
+.claude/
+HARDENING_PROMPT.md
+plan.md
