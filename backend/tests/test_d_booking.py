@@ -65,6 +65,47 @@ async def test_availability_has_slots_within_window(db):
     assert len(slots) > 0
 
 
+async def test_buffer_keeps_next_booking_clear_of_the_gap(db):
+    """A service's before/after buffers must keep the next booking clear of the
+    GAP, not just of the appointment itself — so two bookings can't sit too close.
+    (Scale-audit item: "buffer overlap".) One transaction throughout: create_booking
+    flushes internally, so each booking is visible to the next check without a commit
+    (a commit would expire the ORM objects and break the async session)."""
+    biz, svc, staff, cust = await _setup(db)
+    await db.refresh(svc)                 # svc was expired by _setup's commit
+    svc.buffer_before_minutes = 15
+    svc.buffer_after_minutes = 15
+    await db.flush()                      # persist buffers in-transaction, don't expire cust/staff
+    target = date.today() + timedelta(days=3)
+
+    # Book 12:00–12:30 → with 15‑min buffers this reserves 11:45–12:45.
+    await create_booking(
+        db, business_id=biz.id, service_id=svc.id, staff_id=staff.id,
+        customer=cust, booking_date=target, start_time=time(12, 0),
+    )
+
+    # 12:30 is back‑to‑back with the appointment but INSIDE its after‑buffer → must be
+    # rejected (without buffers this would have been allowed). The overlap check raises
+    # before any write, so the session stays usable.
+    with pytest.raises(ValueError):
+        await create_booking(
+            db, business_id=biz.id, service_id=svc.id, staff_id=staff.id,
+            customer=cust, booking_date=target, start_time=time(12, 30),
+        )
+
+    # Availability must not even OFFER a start inside the reserved 11:45–12:45 window.
+    starts = {s.start_time for s in await get_available_slots(db, biz.id, svc.id, target, staff.id)}
+    assert time(12, 0) not in starts and time(12, 30) not in starts
+
+    # A booking that clears the buffer (13:00, its own before‑buffer starting exactly
+    # at 12:45) is still accepted — the buffer blocks *too‑close*, not everything.
+    ok = await create_booking(
+        db, business_id=biz.id, service_id=svc.id, staff_id=staff.id,
+        customer=cust, booking_date=target, start_time=time(13, 0),
+    )
+    assert ok.id is not None
+
+
 async def test_create_booking_rejects_past_date(db):
     biz, svc, staff, cust = await _setup(db)
     with pytest.raises(ValueError):
