@@ -192,23 +192,43 @@ async def _render_step(message, text: str, kb=None) -> None:
         pass
 
 
+# Cache Telegram's file_id per storefront-photo URL. The URL carries a ?v=N version,
+# so an owner changing their photo automatically busts the old entry (different key).
+# Sending a cached file_id makes Telegram serve the image from its own CDN near the
+# user instead of re-fetching it from our backend on every view — faster on weak
+# connections and lighter on the backend. Per-process (resets on deploy) and re-warms
+# on the first view of each business, so there's nothing to invalidate by hand.
+_PHOTO_FILE_ID_CACHE: dict[str, str] = {}
+
+
 async def _render_business_card(message, photo_url: str | None, text: str, kb) -> None:
     """The business step, as a storefront PHOTO card (image + caption + the
     step's buttons) when the business has a photo; plain text card otherwise.
-    Photo failures (URL unreachable, Telegram hiccup) fall back to text so the
-    booking flow never breaks over a picture."""
+    Reuses Telegram's cached file_id when we've sent this photo before, so repeat
+    views load from Telegram's CDN instead of re-fetching from our backend. Any
+    photo failure falls back to text so the booking flow never breaks over a
+    picture."""
     if photo_url:
-        try:
-            await message.answer_photo(
-                photo=photo_url, caption=text, parse_mode="HTML", reply_markup=kb
-            )
+        cached = _PHOTO_FILE_ID_CACHE.get(photo_url)
+        # Try the cached file_id first (fast path), then the URL. A stale file_id
+        # just drops out and we re-send by URL — the picture is never blocking.
+        for ref, is_cached in ((cached, True), (photo_url, False)):
+            if ref is None:
+                continue
             try:
-                await message.delete()
+                sent = await message.answer_photo(
+                    photo=ref, caption=text, parse_mode="HTML", reply_markup=kb
+                )
+                if sent.photo:  # remember the largest size's file_id for next time
+                    _PHOTO_FILE_ID_CACHE[photo_url] = sent.photo[-1].file_id
+                try:
+                    await message.delete()
+                except Exception:
+                    pass
+                return
             except Exception:
-                pass
-            return
-        except Exception:
-            pass
+                if is_cached:
+                    _PHOTO_FILE_ID_CACHE.pop(photo_url, None)  # bad file_id → drop, retry by URL
     await _render_step(message, text, kb)
 
 
