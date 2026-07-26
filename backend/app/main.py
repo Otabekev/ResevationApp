@@ -14,6 +14,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.config import settings, validate_runtime_config
 from app.database import get_db
 from app.limiter import limiter
+from app.log_redaction import install_log_redaction
 
 logging.basicConfig(
     level=logging.INFO,
@@ -41,6 +42,9 @@ from app.services.scheduler import start_scheduler, stop_scheduler
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     validate_runtime_config(settings)
+    # Before anything can serve a request: stop the access log from recording
+    # secret-bearing URLs (growth secret, login nonce).
+    install_log_redaction()
     start_scheduler()
     yield
     stop_scheduler()
