@@ -74,8 +74,8 @@ class BusinessCreate(BaseModel):
     telegram_username: str | None = Field(None, max_length=100)
     instagram_link: str | None = Field(None, max_length=255)
     description: str | None = Field(None, max_length=2000)
-    latitude: float | None = None
-    longitude: float | None = None
+    latitude: float | None = Field(None, ge=-90, le=90)
+    longitude: float | None = Field(None, ge=-180, le=180)
 
 
 class BusinessUpdate(BaseModel):
@@ -89,17 +89,26 @@ class BusinessUpdate(BaseModel):
     instagram_link: str | None = Field(None, max_length=255)
     description: str | None = Field(None, max_length=2000)
     is_online_booking_enabled: bool | None = None
-    min_advance_booking_minutes: int | None = None
-    max_advance_booking_days: int | None = None
-    cancellation_policy_hours: int | None = None
-    slot_step_minutes: int | None = None
+    # These four drive arithmetic in the availability engine, so they MUST be
+    # bounded here. slot_step_minutes is the sharp one: it's the increment of the
+    # slot-walk loop, and a zero/negative step makes that loop never terminate —
+    # a single PATCH on your OWN business would then hang the whole (single
+    # instance) API on the next anonymous /availability hit. The others feed
+    # timedelta(), which raises OverflowError on absurd values.
+    min_advance_booking_minutes: int | None = Field(None, ge=0, le=43200)   # ≤30 days
+    max_advance_booking_days: int | None = Field(None, ge=1, le=365)
+    cancellation_policy_hours: int | None = Field(None, ge=0, le=720)       # ≤30 days
+    slot_step_minutes: int | None = Field(None, ge=5, le=240)
     allow_multi_service: bool | None = None
     allow_any_staff: bool | None = None
     custom_message_uz: str | None = Field(None, max_length=2000)
     custom_message_ru: str | None = Field(None, max_length=2000)
     custom_message_en: str | None = Field(None, max_length=2000)
-    latitude: float | None = None
-    longitude: float | None = None
+    # Real coordinates only. The range check also rejects NaN/Infinity, which
+    # Python's JSON parser accepts by default and which would otherwise poison
+    # every distance/bounds comparison downstream.
+    latitude: float | None = Field(None, ge=-90, le=90)
+    longitude: float | None = Field(None, ge=-180, le=180)
 
 
 class BusinessOut(BaseModel):

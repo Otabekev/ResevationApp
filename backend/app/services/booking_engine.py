@@ -367,7 +367,13 @@ async def get_available_slots(
         return []
     earliest_allowed = _now + timedelta(minutes=business.min_advance_booking_minutes)
 
+    # The slot-walk below increments by `step`, so a zero/negative value would
+    # loop forever and block the event loop for every tenant. The API schema
+    # bounds this on write; clamp again here because this value can also arrive
+    # from a row written before that bound existed, a seed script, or raw SQL.
     step = business.slot_step_minutes or 15
+    if not 1 <= step <= 240:
+        step = 15
 
     # Resolve eligible staff — must be able to perform EVERY selected service.
     unique_ids = set(ids)

@@ -6,11 +6,18 @@ F3: numeric Pydantic constraints reject engine-breaking values.
 F5: working-hours end must be after start.
 F6: the BOT escapes user content before HTML messages too.
 F7: business text fields are length-bounded.
+F8: business NUMERIC settings are bounded, and the availability engine clamps
+    the slot step even when the stored row is already out of range.
 """
+import asyncio
 import os
 import sys
+from datetime import date, time, timedelta
 
-from tests.factories import auth_header, create_business, create_category, create_user
+from tests.factories import (
+    auth_header, create_business, create_category, create_service, create_staff,
+    create_user, link_staff_service,
+)
 
 API = "/api/v1"
 
@@ -98,3 +105,70 @@ async def test_business_update_rejects_oversized_name(client, db):
         f"{API}/businesses/{biz.id}", json={"name": "x" * 300}, headers=auth_header(owner.id)
     )
     assert resp.status_code == 422, resp.text
+
+
+# ── F8: business numeric settings are bounded ────────────────────────────────
+# A zero/negative slot step is the dangerous one: it's the increment of the
+# availability slot-walk, so it would turn the next anonymous /availability call
+# into an infinite loop that blocks the event loop for every tenant.
+
+async def test_business_update_rejects_engine_breaking_numbers(client, db):
+    owner, biz = await _owner_biz(db)
+    for field, value in [
+        ("slot_step_minutes", 0),
+        ("slot_step_minutes", -1),
+        ("slot_step_minutes", 100000),
+        ("min_advance_booking_minutes", -1),
+        ("min_advance_booking_minutes", 10**9),
+        ("max_advance_booking_days", 0),
+        ("max_advance_booking_days", 10**9),
+        ("cancellation_policy_hours", -1),
+        ("latitude", 200),
+        ("longitude", -500),
+    ]:
+        resp = await client.patch(
+            f"{API}/businesses/{biz.id}", json={field: value}, headers=auth_header(owner.id)
+        )
+        assert resp.status_code == 422, f"{field}={value} was accepted: {resp.text}"
+
+
+async def test_business_update_accepts_normal_settings(client, db):
+    owner, biz = await _owner_biz(db)
+    resp = await client.patch(
+        f"{API}/businesses/{biz.id}",
+        json={
+            "slot_step_minutes": 30, "min_advance_booking_minutes": 60,
+            "max_advance_booking_days": 90, "cancellation_policy_hours": 24,
+            "latitude": 40.86, "longitude": 71.16,
+        },
+        headers=auth_header(owner.id),
+    )
+    assert resp.status_code == 200, resp.text
+    assert resp.json()["slot_step_minutes"] == 30
+
+
+async def test_availability_survives_a_poisoned_slot_step(db):
+    """Defense in depth: even if a row carries a non-positive step (written before
+    the bound existed, or by raw SQL), the engine must clamp instead of spinning
+    forever. Wrapped in a timeout so a regression fails the suite instead of
+    hanging it."""
+    from app.services.booking_engine import get_available_slots
+
+    cat = await create_category(db)
+    owner = await create_user(db, role="business_owner", telegram_id=1)
+    biz = await create_business(db, owner_id=owner.id, category_id=cat.id)
+    svc = await create_service(db, business_id=biz.id, duration_minutes=30)
+    staff = await create_staff(db, business_id=biz.id)
+    await link_staff_service(db, staff_id=staff.id, service_id=svc.id)
+    from app.models.schedule import WorkingHours
+    for dow in range(7):
+        db.add(WorkingHours(business_id=biz.id, day_of_week=dow,
+                            start_time=time(9, 0), end_time=time(18, 0)))
+    biz.slot_step_minutes = 0          # the poisoned value, straight into the DB
+    await db.commit()
+
+    slots = await asyncio.wait_for(
+        get_available_slots(db, biz.id, svc.id, date.today() + timedelta(days=3), staff.id),
+        timeout=10,
+    )
+    assert len(slots) > 0, "clamped step should still produce a normal slot list"
