@@ -209,6 +209,81 @@ async def test_web_login_complete_rejects_bad_secret(client):
     assert poll.json()["status"] == "pending"
 
 
+# ── B8: the login match code binds the bot prompt to the browser ──────────────
+# Confirming in the bot hands a full session to whichever browser made the nonce.
+# Without a code to compare, an attacker can start a login and send the victim the
+# deep link ("confirm your account") — the victim taps "Yes, it's me" and the
+# attacker's poll collects the victim's tokens. The code is shown on BOTH screens
+# and the user is told to confirm only when they match; a victim who never opened
+# the login page has nothing to match, so they refuse.
+
+
+def _bot_textutils():
+    import os
+    import sys
+
+    bot_dir = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "..", "bot"))
+    sys.path.insert(0, bot_dir)
+    try:
+        import textutils
+
+        return textutils
+    finally:
+        sys.path.remove(bot_dir)
+
+
+def test_match_code_derivation():
+    tu = _bot_textutils()
+    assert tu.login_match_code("3a7f1c2d4e5f60718293a4b5c6d7e8f9") == "3A7F"
+    # Different logins get different codes — otherwise it tells the user nothing.
+    assert tu.login_match_code("aaaa1111") != tu.login_match_code("bbbb2222")
+
+
+def test_login_nonce_shape_is_validated():
+    """A crafted deep link must not reach the confirm keyboard: callback_data is
+    capped at 64 bytes, so an oversized nonce would raise while building it."""
+    tu = _bot_textutils()
+    assert tu.is_valid_login_nonce("3a7f1c2d4e5f60718293a4b5c6d7e8f9")
+    for bad in ("", "short", "x" * 65, "has space", "<script>", "semi;colon"):
+        assert not tu.is_valid_login_nonce(bad), bad
+
+
+def test_frontend_and_bot_derive_the_same_code():
+    """The mitigation is only real if BOTH screens show the same value. If these
+    two implementations ever drift, users see mismatched codes on every honest
+    login, learn the warning is noise, and confirm anyway — which is worse than
+    having no code at all. Pin the JS rule to the Python one."""
+    import os
+    import re
+
+    login_jsx = os.path.abspath(
+        os.path.join(os.path.dirname(__file__), "..", "..", "frontend", "src", "pages", "Login.jsx")
+    )
+    with open(login_jsx, encoding="utf-8") as fh:
+        src = fh.read()
+
+    body = re.search(r"function matchCode\(nonce\)\s*\{(.*?)\}", src, re.S)
+    assert body, "Login.jsx no longer defines matchCode()"
+    # nonce.slice(0, 4).toUpperCase() — same first-4-chars, uppercased rule.
+    assert re.search(r"nonce\.slice\(\s*0\s*,\s*4\s*\)\.toUpperCase\(\)", body.group(1)), (
+        "Login.jsx matchCode() must stay identical to bot login_match_code()"
+    )
+    assert "matchCode(nonce)" in src, "the code is computed but never rendered"
+
+
+def test_bot_confirm_prompt_carries_the_code_in_every_language():
+    import json
+    import os
+
+    locales = os.path.abspath(
+        os.path.join(os.path.dirname(__file__), "..", "..", "bot", "locales")
+    )
+    for lang in ("uz", "ru", "en"):
+        with open(os.path.join(locales, f"{lang}.json"), encoding="utf-8") as fh:
+            text = json.load(fh)["web_login_confirm"]
+        assert "{code}" in text, f"{lang} prompt shows no match code"
+
+
 # ── B7: password hashing must actually work (passlib/bcrypt compat) ───────────
 
 def test_password_hashing_roundtrip():

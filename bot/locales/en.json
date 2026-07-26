@@ -65,7 +65,7 @@
   "wd_4": "Fri",
   "wd_5": "Sat",
   "wd_6": "Sun",
-  "web_login_confirm": "🔐 Confirm login to the web dashboard? If this wasn't you, ignore this message.",
+  "web_login_confirm": "🔐 Confirm login to the web dashboard?\n\nConfirmation code: <b>{code}</b>\n\n⚠️ Only confirm if your browser is showing the SAME code. If you didn't start this login, or the code is different, don't confirm — someone else would get into your account.",
   "web_login_yes": "✅ Yes, it's me",
   "web_login_done": "✅ Done! Return to your browser — you're logged in.",
   "web_login_failed": "❌ Login failed. Please try again from the browser.",
