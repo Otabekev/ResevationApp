@@ -17,7 +17,7 @@
         { "key": "Referrer-Policy", "value": "strict-origin-when-cross-origin" },
         { "key": "Strict-Transport-Security", "value": "max-age=31536000; includeSubDomains" },
         { "key": "Permissions-Policy", "value": "geolocation=(), microphone=(), camera=()" },
-        { "key": "Content-Security-Policy", "value": "frame-ancestors 'self' https://web.telegram.org https://*.telegram.org https://telegram.org" }
+        { "key": "Content-Security-Policy", "value": "default-src 'self'; base-uri 'self'; object-src 'none'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob: https://resevationapp-backend-production.up.railway.app; font-src 'self' data:; connect-src 'self' https://resevationapp-backend-production.up.railway.app; worker-src 'self'; manifest-src 'self'; form-action 'self'; frame-src 'self' https://www.openstreetmap.org; frame-ancestors 'self' https://web.telegram.org https://*.telegram.org https://telegram.org" }
       ]
     }
   ]

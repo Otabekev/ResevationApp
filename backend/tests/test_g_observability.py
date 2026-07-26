@@ -52,3 +52,36 @@ async def test_health_503_when_scheduler_dead(client, monkeypatch):
     assert resp.status_code == 503
     assert resp.json()["db"] is True
     assert resp.json()["scheduler"]["healthy"] is False
+
+
+# ── G4: the frontend CSP config keeps its teeth ─────────────────────────────
+# vercel.json ships the SPA's Content-Security-Policy. It's easy to loosen or
+# drop a directive by accident during a frontend edit, so pin the load-bearing
+# ones: script-src must stay locked to 'self' (the whole point — no inline/eval),
+# and the Telegram frame-ancestors embed must survive.
+
+def test_frontend_csp_keeps_script_src_locked_and_telegram_embed():
+    import json
+    import os
+
+    vercel = os.path.join(
+        os.path.dirname(__file__), "..", "..", "frontend", "vercel.json"
+    )
+    with open(vercel, encoding="utf-8") as fh:
+        config = json.load(fh)
+
+    csps = [
+        h["value"]
+        for group in config["headers"]
+        for h in group["headers"]
+        if h["key"] == "Content-Security-Policy"
+    ]
+    assert len(csps) == 1, "exactly one CSP header, or the browser picks the strictest and breaks things"
+    csp = csps[0]
+    assert "script-src 'self'" in csp, "script-src must stay 'self' — no inline/eval slipping back in"
+    assert "'unsafe-eval'" not in csp and "'unsafe-inline'" not in csp.split("style-src")[0], \
+        "no unsafe-* on script-src"
+    assert "object-src 'none'" in csp
+    # The map preview iframe and the Telegram web embed must remain allowed.
+    assert "frame-src 'self' https://www.openstreetmap.org" in csp
+    assert "frame-ancestors 'self' https://web.telegram.org" in csp
