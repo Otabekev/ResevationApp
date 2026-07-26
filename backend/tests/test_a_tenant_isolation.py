@@ -76,6 +76,38 @@ async def test_review_rejected_without_bot_secret(client, db):
     assert resp.status_code in (401, 403), resp.text
 
 
+# ── A3b: the public reviews feed must not leak internal sequential ids ───────
+
+async def test_public_reviews_hide_internal_ids(client, db):
+    """The reviews list is unauthenticated. Returning customer_id/booking_id (both
+    sequential) would let anyone read off platform-wide id ranges by business.
+    Only stars, comment and date are public."""
+    from app.models.booking import Review
+
+    cat = await create_category(db)
+    owner = await create_user(db, role="business_owner", telegram_id=333)
+    biz = await create_business(db, owner_id=owner.id, category_id=cat.id, status="active")
+    svc = await create_service(db, business_id=biz.id)
+    staff = await create_staff(db, business_id=biz.id)
+    cust = await create_customer(db, telegram_id=7777)
+    booking = await create_booking(
+        db, business_id=biz.id, service_id=svc.id, staff_id=staff.id,
+        customer_id=cust.id, status="completed",
+    )
+    db.add(Review(booking_id=booking.id, customer_id=cust.id, business_id=biz.id,
+                  staff_id=staff.id, rating=5, comment="Great"))
+    await db.commit()
+
+    resp = await client.get(f"{API}/businesses/{biz.id}/reviews")
+    assert resp.status_code == 200, resp.text
+    rows = resp.json()
+    assert len(rows) == 1
+    assert rows[0]["rating"] == 5 and rows[0]["comment"] == "Great"
+    # The whole point: no internal ids in the public payload.
+    for leaky in ("customer_id", "booking_id", "id", "staff_id", "business_id"):
+        assert leaky not in rows[0], f"public review leaked {leaky}"
+
+
 # ── A4: admin user list must not leak password hashes ────────────────────────
 
 async def test_admin_users_does_not_leak_password_hash(client, db):

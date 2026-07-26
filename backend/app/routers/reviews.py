@@ -1,3 +1,5 @@
+from datetime import datetime
+
 from fastapi import APIRouter, Depends, HTTPException, Request, status
 from pydantic import BaseModel, Field
 from sqlalchemy import and_, select
@@ -24,6 +26,19 @@ class ReviewOut(BaseModel):
     rating: int
     comment: str | None
     customer_id: int
+
+    model_config = {"from_attributes": True}
+
+
+class ReviewPublic(BaseModel):
+    """What an UNAUTHENTICATED caller may see. Deliberately omits the internal
+    ids ReviewOut carries: customer_id and booking_id are sequential, so a public
+    reviews feed would otherwise let anyone iterate a business's reviews and read
+    off platform-wide customer/booking id ranges (total volume, who-reviewed-what).
+    Only the review's own content — stars, comment, date — is public."""
+    rating: int
+    comment: str | None
+    created_at: datetime
 
     model_config = {"from_attributes": True}
 
@@ -65,7 +80,7 @@ async def create_review(
     return review
 
 
-@router.get("/businesses/{business_id}/reviews", response_model=list[ReviewOut])
+@router.get("/businesses/{business_id}/reviews", response_model=list[ReviewPublic])
 async def get_business_reviews(business_id: int, db: AsyncSession = Depends(get_db)):
     result = await db.execute(
         select(Review).where(
