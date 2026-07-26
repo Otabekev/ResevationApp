@@ -22,6 +22,11 @@ class User(Base):
     )
     language: Mapped[str] = mapped_column(String(5), default="uz")  # uz / ru / en
     is_active: Mapped[bool] = mapped_column(Boolean, default=True)
+    # Server-side token kill switch. Every JWT carries the value it was minted
+    # with; bumping it (log out everywhere) invalidates all older tokens without
+    # deactivating the account. 0 default keeps pre-existing tokens (no version
+    # claim → read as 0) valid across the deploy that introduced this.
+    token_version: Mapped[int] = mapped_column(Integer, default=0, server_default="0", nullable=False)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
     updated_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now(), onupdate=func.now()

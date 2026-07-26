@@ -64,8 +64,8 @@ async def auth_telegram(request: Request, body: TelegramAuthRequest, db: AsyncSe
     await db.commit()
 
     return TokenResponse(
-        access_token=create_access_token(user.id),
-        refresh_token=create_refresh_token(user.id),
+        access_token=create_access_token(user.id, user.token_version),
+        refresh_token=create_refresh_token(user.id, user.token_version),
         user_id=user.id,
         role=user.role,
         name=user.name,
@@ -114,8 +114,8 @@ async def auth_telegram_widget(
     await db.commit()
 
     return TokenResponse(
-        access_token=create_access_token(user.id),
-        refresh_token=create_refresh_token(user.id),
+        access_token=create_access_token(user.id, user.token_version),
+        refresh_token=create_refresh_token(user.id, user.token_version),
         user_id=user.id,
         role=user.role,
         name=user.name,
@@ -146,8 +146,8 @@ async def auth_bot(request: Request, body: BotAuthRequest, db: AsyncSession = De
     await db.commit()
 
     return TokenResponse(
-        access_token=create_access_token(user.id),
-        refresh_token=create_refresh_token(user.id),
+        access_token=create_access_token(user.id, user.token_version),
+        refresh_token=create_refresh_token(user.id, user.token_version),
         user_id=user.id,
         role=user.role,
         name=user.name,
@@ -189,8 +189,8 @@ async def complete_web_login(
     await db.commit()
 
     payload = TokenResponse(
-        access_token=create_access_token(user.id),
-        refresh_token=create_refresh_token(user.id),
+        access_token=create_access_token(user.id, user.token_version),
+        refresh_token=create_refresh_token(user.id, user.token_version),
         user_id=user.id,
         role=user.role,
         name=user.name,
@@ -231,10 +231,35 @@ async def refresh_tokens(request: Request, body: RefreshRequest, db: AsyncSessio
     user = result.scalar_one_or_none()
     if not user or not user.is_active:
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="User not found")
+    # A refresh token from before a log-out-everywhere must not mint fresh access.
+    if payload.get("ver", 0) != user.token_version:
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Token revoked")
 
     return TokenResponse(
-        access_token=create_access_token(user.id),
-        refresh_token=create_refresh_token(user.id),
+        access_token=create_access_token(user.id, user.token_version),
+        refresh_token=create_refresh_token(user.id, user.token_version),
+        user_id=user.id,
+        role=user.role,
+        name=user.name,
+        language=user.language,
+    )
+
+
+@router.post("/logout-all", response_model=TokenResponse)
+async def logout_all_devices(
+    user: User = Depends(get_current_user), db: AsyncSession = Depends(get_db)
+):
+    """Invalidate every token issued to the caller (e.g. a device was lost, or a
+    session may be compromised) by bumping token_version — the server-side kill
+    switch a 30-day localStorage refresh token otherwise lacked. Returns a fresh
+    pair minted at the new version so the CALLER stays signed in while every other
+    session is dropped on its next request/refresh."""
+    user.token_version = (user.token_version or 0) + 1
+    db.add(user)
+    await db.commit()
+    return TokenResponse(
+        access_token=create_access_token(user.id, user.token_version),
+        refresh_token=create_refresh_token(user.id, user.token_version),
         user_id=user.id,
         role=user.role,
         name=user.name,
