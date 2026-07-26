@@ -16,15 +16,21 @@ pwd_context = CryptContext(schemes=["bcrypt"], deprecated="auto")
 ALGORITHM = "HS256"
 
 
-def create_access_token(user_id: int) -> str:
+def create_access_token(user_id: int, token_version: int = 0) -> str:
     expire = datetime.now(timezone.utc) + timedelta(minutes=settings.access_token_expire_minutes)
-    return jwt.encode({"sub": str(user_id), "exp": expire}, settings.secret_key, algorithm=ALGORITHM)
+    # "ver" pins the token to the user's current token_version so a later
+    # log-out-everywhere (which bumps that column) invalidates this token.
+    return jwt.encode(
+        {"sub": str(user_id), "exp": expire, "ver": token_version},
+        settings.secret_key,
+        algorithm=ALGORITHM,
+    )
 
 
-def create_refresh_token(user_id: int) -> str:
+def create_refresh_token(user_id: int, token_version: int = 0) -> str:
     expire = datetime.now(timezone.utc) + timedelta(days=settings.refresh_token_expire_days)
     return jwt.encode(
-        {"sub": str(user_id), "exp": expire, "type": "refresh"},
+        {"sub": str(user_id), "exp": expire, "type": "refresh", "ver": token_version},
         settings.secret_key,
         algorithm=ALGORITHM,
     )

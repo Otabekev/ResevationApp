@@ -292,3 +292,61 @@ def test_password_hashing_roundtrip():
     h = hash_password("test-password-123")
     assert verify_password("test-password-123", h)
     assert not verify_password("wrong-password", h)
+
+
+# ── B9: token_version — a server-side kill switch for issued JWTs ─────────────
+
+async def test_logout_all_revokes_old_tokens_but_keeps_the_caller_signed_in(client, db):
+    """POST /auth/logout-all bumps token_version: every token minted before it is
+    rejected, while the fresh pair it returns (minted at the new version) keeps the
+    caller working. This is the revocation a 30-day localStorage token lacked."""
+    user = await create_user(db, telegram_id=8100, name="Owner")
+    old_access = create_access_token(user.id, user.token_version)
+    h_old = {"Authorization": f"Bearer {old_access}"}
+
+    # The old token works before the bump.
+    assert (await client.get(f"{API}/auth/me", headers=h_old)).status_code == 200
+
+    resp = await client.post(f"{API}/auth/logout-all", headers=h_old)
+    assert resp.status_code == 200, resp.text
+    new_access = resp.json()["access_token"]
+
+    # Old token is now dead; the fresh one from the response still works.
+    dead = await client.get(f"{API}/auth/me", headers=h_old)
+    assert dead.status_code == 401 and "revoked" in dead.text.lower()
+    ok = await client.get(f"{API}/auth/me", headers={"Authorization": f"Bearer {new_access}"})
+    assert ok.status_code == 200
+
+
+async def test_stale_refresh_token_cannot_mint_after_logout_all(client, db):
+    """A leaked refresh token must not survive a log-out-everywhere."""
+    user = await create_user(db, telegram_id=8101, name="Owner")
+    old_refresh = create_refresh_token(user.id, user.token_version)
+
+    # Bump the version out from under the old refresh token.
+    await client.post(
+        f"{API}/auth/logout-all",
+        headers={"Authorization": f"Bearer {create_access_token(user.id, user.token_version)}"},
+    )
+
+    resp = await client.post(f"{API}/auth/refresh", json={"refresh_token": old_refresh})
+    assert resp.status_code == 401, resp.text
+
+
+async def test_preversion_token_stays_valid_after_deploy(client, db):
+    """Backward compatibility: a token minted before this feature carries no 'ver'
+    claim. Verification reads that as 0, which matches the default column, so no
+    one is logged out by the deploy that introduced token_version."""
+    from datetime import datetime, timedelta, timezone
+
+    from jose import jwt
+
+    user = await create_user(db, telegram_id=8102, name="Owner")
+    # A pre-feature access token: sub + exp, NO ver claim.
+    legacy = jwt.encode(
+        {"sub": str(user.id), "exp": datetime.now(timezone.utc) + timedelta(minutes=60)},
+        settings.secret_key,
+        algorithm="HS256",
+    )
+    resp = await client.get(f"{API}/auth/me", headers={"Authorization": f"Bearer {legacy}"})
+    assert resp.status_code == 200, resp.text

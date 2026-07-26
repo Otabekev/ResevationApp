@@ -58,6 +58,11 @@ async def get_current_user(
     user = result.scalar_one_or_none()
     if not user or not user.is_active:
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="User not found")
+    # Token kill switch: a stale version means the user logged out everywhere
+    # after this token was minted. Pre-version tokens carry no "ver" → 0, which
+    # matches the default column, so nothing issued before the feature breaks.
+    if payload.get("ver", 0) != user.token_version:
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Token revoked")
     return user
 
 
