@@ -10,8 +10,11 @@ from app.models.user import User
 from app.services.auth_service import create_access_token
 
 
-def auth_header(user_id: int) -> dict:
-    return {"Authorization": f"Bearer {create_access_token(user_id)}"}
+def auth_header(user_id: int, token_version: int = 0) -> dict:
+    # token_version defaults to 0 (matches a fresh user), so existing call sites
+    # are unchanged. A test that bumps a user's version must pass the new value,
+    # or the minted token reads as revoked — see the token_version kill switch.
+    return {"Authorization": f"Bearer {create_access_token(user_id, token_version)}"}
 
 
 async def create_category(db, slug="barbershop") -> BusinessCategory:
