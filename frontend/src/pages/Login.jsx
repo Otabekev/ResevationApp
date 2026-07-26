@@ -25,6 +25,16 @@ function makeNonce() {
   return Array.from(a, (b) => b.toString(16).padStart(2, "0")).join("");
 }
 
+// The code shown here AND in the bot's confirmation prompt. Confirming in the
+// bot hands this browser a full session, so the prompt must be tied to a screen:
+// the user is told to confirm only when the two codes match. Someone who was
+// merely SENT the deep link has no screen to match against — that's what stops
+// the "confirm this login" phishing route to account takeover.
+// Must stay identical to login_match_code() in bot/textutils.py.
+function matchCode(nonce) {
+  return nonce.slice(0, 4).toUpperCase();
+}
+
 function BrandPanel({ t }) {
   return (
     <div
@@ -289,7 +299,34 @@ export default function Login() {
                   </a>
                 </div>
               </div>
-            ) : (
+            ) : null}
+
+            {waiting && (
+              <div
+                style={{
+                  marginTop: "var(--space-3)", padding: "var(--space-4)",
+                  border: "1px dashed var(--brand-200)", borderRadius: "var(--radius-sm)",
+                  textAlign: "center",
+                }}
+              >
+                <div style={{ fontSize: "var(--text-xs)", color: "var(--gray-500)", fontWeight: 650 }}>
+                  {t("login_match_code_label")}
+                </div>
+                <div
+                  style={{
+                    fontSize: 30, fontWeight: 800, letterSpacing: "0.22em",
+                    color: "var(--brand-800)", margin: "6px 0 8px", fontVariantNumeric: "tabular-nums",
+                  }}
+                >
+                  {matchCode(nonce)}
+                </div>
+                <div style={{ fontSize: "var(--text-xs)", color: "var(--gray-500)", lineHeight: 1.5 }}>
+                  {t("login_match_code_hint")}
+                </div>
+              </div>
+            )}
+
+            {!waiting && (
               <p style={{ color: "var(--gray-400)", fontSize: "var(--text-xs)", textAlign: "center", lineHeight: 1.5, marginTop: "var(--space-3)" }}>
                 {t("login_with_telegram_hint")}
               </p>

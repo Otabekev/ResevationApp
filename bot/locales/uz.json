@@ -65,7 +65,7 @@
   "wd_4": "Ju",
   "wd_5": "Sh",
   "wd_6": "Ya",
-  "web_login_confirm": "🔐 Veb-paneliga kirishni tasdiqlaysizmi? Agar bu siz bo'lmasangiz, ushbu xabarni e'tiborsiz qoldiring.",
+  "web_login_confirm": "🔐 Veb-paneliga kirishni tasdiqlaysizmi?\n\nTasdiqlash kodi: <b>{code}</b>\n\n⚠️ Faqat brauzeringizdagi ekranda AYNAN shu kod ko'rinsa tasdiqlang. Agar siz kirmoqchi bo'lmagan bo'lsangiz yoki kod boshqacha bo'lsa — tasdiqlamang: aks holda boshqa odam sizning hisobingizga kiradi.",
   "web_login_yes": "✅ Ha, bu men",
   "web_login_done": "✅ Tayyor! Brauzeringizga qayting — siz tizimga kirdingiz.",
   "web_login_failed": "❌ Kirishda xatolik. Iltimos, brauzerda qaytadan urinib ko'ring.",

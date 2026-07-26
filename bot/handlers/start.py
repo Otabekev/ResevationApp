@@ -16,7 +16,7 @@ from aiogram.types import (
 
 import api_client
 from i18n import t
-from textutils import esc
+from textutils import esc, is_valid_login_nonce, login_match_code
 
 logger = logging.getLogger(__name__)
 router = Router()
@@ -144,11 +144,17 @@ async def cmd_start(message: Message, state: FSMContext) -> None:
         await message.answer(t("choose_language", lang), reply_markup=language_keyboard())
         return
     if start_param.startswith("login_"):
-        # login_{nonce} — web dashboard login. Ask the user to confirm so a
-        # drive-by /start can't silently authenticate someone else's browser.
+        # login_{nonce} — web dashboard login. Confirming releases this user's
+        # tokens to whichever browser generated the nonce, so the prompt has to
+        # be tied to a screen: show the match code and tell the user to confirm
+        # only if the same code is on their login page. Someone who was SENT this
+        # link (consent phishing → account takeover) has no such screen.
         nonce = start_param[6:]
+        if not is_valid_login_nonce(nonce):
+            await message.answer(t("web_login_failed", lang))
+            return
         await message.answer(
-            t("web_login_confirm", lang),
+            t("web_login_confirm", lang, code=login_match_code(nonce)),
             reply_markup=InlineKeyboardMarkup(inline_keyboard=[
                 [InlineKeyboardButton(text=t("web_login_yes", lang), callback_data=f"weblogin_{nonce}")]
             ])
@@ -330,6 +336,10 @@ async def confirm_web_login(callback: CallbackQuery, state: FSMContext) -> None:
     data = await state.get_data()
     lang = data.get("lang", "uz")
     nonce = callback.data[len("weblogin_"):]
+    if not is_valid_login_nonce(nonce):
+        await callback.message.edit_text(t("web_login_failed", lang))
+        await callback.answer()
+        return
     u = callback.from_user
     try:
         await api_client.complete_web_login(nonce, u.id, u.full_name, u.username, lang)
