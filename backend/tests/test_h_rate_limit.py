@@ -114,3 +114,47 @@ def test_single_shared_limiter_instance():
 
     assert main_limiter is limiter
     assert auth_limiter is limiter
+
+
+# ── H4: the public read endpoints actually enforce a limit ───────────────────
+# The conftest client disables the limiter so tests don't throttle each other.
+# These re-enable it for one endpoint call to prove the @limiter.limit decorators
+# on public.py are LIVE (a missing `request: Request` param would make slowapi
+# silently skip them), then reset so no state leaks to the next test.
+
+import pytest_asyncio
+from httpx import ASGITransport, AsyncClient
+
+from app.database import get_db
+from app.main import app as fastapi_app
+
+
+@pytest_asyncio.fixture
+async def limited_client(sessionmaker_):
+    async def _override_get_db():
+        async with sessionmaker_() as session:
+            yield session
+
+    fastapi_app.dependency_overrides[get_db] = _override_get_db
+    limiter.reset()
+    fastapi_app.state.limiter.enabled = True
+    transport = ASGITransport(app=fastapi_app, raise_app_exceptions=False)
+    try:
+        async with AsyncClient(transport=transport, base_url="http://testserver") as c:
+            yield c
+    finally:
+        fastapi_app.state.limiter.enabled = False
+        limiter.reset()
+        fastapi_app.dependency_overrides.clear()
+
+
+async def test_public_launch_status_enforces_a_ceiling(limited_client):
+    """120/min per key. A single anonymous IP hammering past it must start getting
+    429s — proof the decorator is wired (not a no-op from a missing Request param)."""
+    url = "/api/v1/public/launch-status"
+    codes = [(await limited_client.get(url)).status_code for _ in range(140)]
+    assert 200 in codes, "the endpoint should serve normally under the ceiling"
+    assert 429 in codes, "hammering past 120/min must trip the limiter"
+    # Everything before the first 429 is a 200 (a clean ceiling, not flapping).
+    first_429 = codes.index(429)
+    assert set(codes[:first_429]) == {200}

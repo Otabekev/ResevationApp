@@ -394,7 +394,9 @@ async def category_chosen(callback: CallbackQuery, state: FSMContext) -> None:
     await state.update_data(category_id=category_id)
 
     try:
-        businesses = await api_client.get_businesses_by_category(category_id)
+        businesses = await api_client.get_businesses_by_category(
+            category_id, telegram_id=callback.from_user.id
+        )
     except Exception:
         await callback.message.answer(t("server_error", lang))
         return
@@ -545,7 +547,7 @@ async def _show_staff_step(callback: CallbackQuery, state: FSMContext, data: dic
     staff_list = data.get("staff_cache")
     if staff_list is None:
         try:
-            staff_list = await api_client.get_staff(business_id)
+            staff_list = await api_client.get_staff(business_id, telegram_id=callback.from_user.id)
         except Exception:
             staff_list = []  # render empty this time, but don't cache a failure → retry on next visit
         else:
