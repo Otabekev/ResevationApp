@@ -118,10 +118,11 @@ async def get_categories() -> list[dict]:
     return resp.json()
 
 
-async def get_businesses_by_category(category_id: int) -> list[dict]:
+async def get_businesses_by_category(category_id: int, telegram_id: int | None = None) -> list[dict]:
     resp = await _client.get(
         f"{BACKEND_URL}/public/businesses",
         params={"category_id": category_id},
+        headers=_bot_headers(telegram_id),
     )
     resp.raise_for_status()
     return resp.json()
@@ -139,8 +140,11 @@ async def get_services(business_id: int) -> list[dict]:
     return resp.json()
 
 
-async def get_staff(business_id: int) -> list[dict]:
-    resp = await _client.get(f"{BACKEND_URL}/public/businesses/{business_id}/staff")
+async def get_staff(business_id: int, telegram_id: int | None = None) -> list[dict]:
+    resp = await _client.get(
+        f"{BACKEND_URL}/public/businesses/{business_id}/staff",
+        headers=_bot_headers(telegram_id),
+    )
     resp.raise_for_status()
     return resp.json()
 

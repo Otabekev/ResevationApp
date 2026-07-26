@@ -551,7 +551,14 @@ async def create_manual_booking(
 
 
 @router.post("/businesses/{business_id}/bookings/plan")
+# The heaviest write in the app: up to 60 slots (schema-capped), each running a
+# full availability computation and its own commit. It's manager-authenticated,
+# so this keys per-user — a ceiling well above any real "book a treatment course"
+# action, but low enough that a compromised dashboard account can't spin the loop
+# on repeat to load the DB.
+@limiter.limit("20/minute")
 async def create_treatment_plan(
+    request: Request,
     business_id: int,
     body: TreatmentPlanCreate,
     background: BackgroundTasks,

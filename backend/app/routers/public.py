@@ -2,21 +2,31 @@
 Public read-only endpoints used by the Telegram bot.
 No authentication required.
 """
-from fastapi import APIRouter, Depends, Query
+from fastapi import APIRouter, Depends, Query, Request
 from sqlalchemy import and_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.config import settings
 from app.database import get_db
+from app.limiter import limiter
 from app.models.business import Business
 from app.models.staff import Staff, StaffService
 from app.models.user import User
 
 router = APIRouter(prefix="/public", tags=["public"])
 
+# These are the only unauthenticated GETs the bot hits per user. The bot now
+# sends X-Bot-User on all three, so each is keyed per Telegram user (rate_limit_key
+# → tg:<id>); a direct, secret-less attacker keys per IP instead. 120/min is a
+# generous ceiling — a real user navigating the booking flow hits each a handful
+# of times a minute — that still caps hammering/enumeration by any single key.
+_PUBLIC_READ_LIMIT = "120/minute"
+
 
 @router.get("/launch-status")
+@limiter.limit(_PUBLIC_READ_LIMIT)
 async def launch_status(
+    request: Request,
     telegram_id: int | None = Query(None),
     db: AsyncSession = Depends(get_db),
 ):
@@ -60,7 +70,9 @@ async def launch_status(
 
 
 @router.get("/businesses")
+@limiter.limit(_PUBLIC_READ_LIMIT)
 async def list_active_businesses(
+    request: Request,
     category_id: int | None = Query(None),
     region: str | None = Query(None),
     district: str | None = Query(None),
@@ -94,7 +106,10 @@ async def list_active_businesses(
 
 
 @router.get("/businesses/{business_id}/staff")
-async def list_public_staff(business_id: int, db: AsyncSession = Depends(get_db)):
+@limiter.limit(_PUBLIC_READ_LIMIT)
+async def list_public_staff(
+    business_id: int, request: Request, db: AsyncSession = Depends(get_db)
+):
     # Don't expose the roster of a business the platform hasn't published (pending)
     # or has turned off (suspended/blocked) — this is an unauthenticated endpoint.
     biz = await db.get(Business, business_id)
