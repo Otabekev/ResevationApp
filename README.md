@@ -37,7 +37,7 @@ What makes it more than "a booking bot" is that it models **three different real
 
 ### 🔗 Live
 
-**Owner dashboard →** [qulaynavbat.com](https://qulaynavbat.com) · **Customer bot →** `@YourBot` *(add your bot link here)*
+**Owner dashboard →** [qulaynavbat.com](https://qulaynavbat.com) · **Customer bot →** `@QulayNavbat_bot`
 
 </div>
 
