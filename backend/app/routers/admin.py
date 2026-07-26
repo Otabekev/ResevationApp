@@ -664,6 +664,11 @@ async def growth_map(
     # browser history) or the legacy query param. Constant-time compare so it
     # can't be timing-guessed; rate-limited so a leaked secret can't be used to
     # hammer this heavy feed.
+    #
+    # DEPRECATED: the `?secret=` form. It is still accepted only because the
+    # investor site (QN_Investor/growth-source.js) sends it that way; the access
+    # log no longer records it (see app/log_redaction.py). Once that site switches
+    # to the X-Growth-Secret header, delete the Query param below.
     provided = x_growth_secret or secret
     if not settings.growth_secret or not hmac.compare_digest(provided, settings.growth_secret):
         raise HTTPException(status_code=403, detail="Forbidden")
