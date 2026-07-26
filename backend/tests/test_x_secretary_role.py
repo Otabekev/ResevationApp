@@ -7,7 +7,8 @@ staff/services, but:
   - must be scoped strictly to clinics she's assigned to (NO cross-tenant access),
   - must NOT change business settings or the storefront photo (owner-only),
   - must NOT appear as a bookable provider,
-  - must NOT be able to promote anyone (grant can_manage).
+  - must NOT be able to promote anyone (grant can_manage),
+  - must NOT touch the OWNER'S own provider record (edit/delete/reassign).
 """
 from tests import factories as f
 
@@ -101,6 +102,66 @@ async def test_secretary_cannot_grant_manager_rights(client, db):
     )
     assert r.status_code == 201
     assert r.json()["can_manage"] is False  # silently forced off for a non-owner caller
+
+
+# ── The owner's own provider record is off-limits to the desk ────────────────
+
+async def _clinic_with_secretary_and_owner_provider(db, *, tid_owner, tid_sec, slug):
+    owner, biz, sec = await _clinic_with_secretary(db, tid_owner=tid_owner, tid_sec=tid_sec, slug=slug)
+    owner_staff = await f.create_staff(
+        db, business_id=biz.id, user_id=owner.id, name="Dr. Owner", is_owner=True,
+    )
+    return owner, biz, sec, owner_staff
+
+
+async def test_secretary_cannot_edit_or_delete_the_owners_provider(client, db):
+    """The boss hands out a desk account; that account must not be able to rename
+    him, take him off the schedule, or delete him from his own clinic."""
+    owner, biz, sec, owner_staff = await _clinic_with_secretary_and_owner_provider(
+        db, tid_owner=9040, tid_sec=9041, slug="cOwn1"
+    )
+    h = f.auth_header(sec.id)
+    base = f"{API}/businesses/{biz.id}/staff/{owner_staff.id}"
+
+    assert (await client.patch(base, json={"name": "Nobody"}, headers=h)).status_code == 403
+    assert (await client.patch(base, json={"is_active": False}, headers=h)).status_code == 403
+    assert (await client.put(f"{base}/services", json=[], headers=h)).status_code == 403
+    assert (await client.delete(base, headers=h)).status_code == 403
+
+    await db.refresh(owner_staff)
+    assert owner_staff.name == "Dr. Owner" and owner_staff.is_active is True
+
+
+async def test_owner_can_still_manage_their_own_provider_record(client, db):
+    """The guard must bite on the caller, not the record — the owner keeps full
+    control of his own profile."""
+    owner, biz, sec, owner_staff = await _clinic_with_secretary_and_owner_provider(
+        db, tid_owner=9042, tid_sec=9043, slug="cOwn2"
+    )
+    r = await client.patch(
+        f"{API}/businesses/{biz.id}/staff/{owner_staff.id}",
+        json={"name": "Dr. Owner Renamed"},
+        headers=f.auth_header(owner.id),
+    )
+    assert r.status_code == 200, r.text
+    assert r.json()["name"] == "Dr. Owner Renamed"
+
+
+async def test_secretary_can_still_manage_ordinary_staff(client, db):
+    """Regression guard: the owner-record check must not lock the desk out of the
+    doctors it exists to manage."""
+    owner, biz, sec, _ = await _clinic_with_secretary_and_owner_provider(
+        db, tid_owner=9044, tid_sec=9045, slug="cOwn3"
+    )
+    doctor = await f.create_staff(db, business_id=biz.id, name="Dr. Normal")
+    h = f.auth_header(sec.id)
+    r = await client.patch(
+        f"{API}/businesses/{biz.id}/staff/{doctor.id}", json={"name": "Dr. Renamed"}, headers=h
+    )
+    assert r.status_code == 200, r.text
+    assert (await client.put(
+        f"{API}/businesses/{biz.id}/staff/{doctor.id}/services", json=[], headers=h
+    )).status_code == 200
 
 
 # ── Cross-tenant isolation — the leak the owner fears most ───────────────────

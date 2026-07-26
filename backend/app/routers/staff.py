@@ -44,31 +44,38 @@ def _normalize_phone(raw: str | None) -> str | None:
 
 # ── Schemas ──────────────────────────────────────────────────────────────────
 
+# Bounds mirror the DB columns in models/staff.py — name String(255), phone
+# String(20), role/scheduling_mode String(20). Without them an over-long value
+# passes validation and dies at INSERT as a 500 instead of a clean 422 (bio is
+# Text, so its cap is an abuse ceiling rather than a column limit).
+_NAME_MAX, _PHONE_MAX, _SHORT_MAX, _BIO_MAX = 255, 20, 20, 1000
+
+
 class StaffCreate(BaseModel):
-    name: str
-    phone: str | None = None
-    bio: str | None = None
-    role: str = "staff"
+    name: str = Field(..., max_length=_NAME_MAX)
+    phone: str | None = Field(None, max_length=_PHONE_MAX)
+    bio: str | None = Field(None, max_length=_BIO_MAX)
+    role: str = Field("staff", max_length=_SHORT_MAX)
     can_set_own_hours: bool = False
     service_ids: list[int] = []
     # A secretary = a manager who isn't bookable: can_manage=True, is_provider=False.
     # can_manage is honored only when the CALLER is the owner (see add_staff).
     can_manage: bool = False
     is_provider: bool = True
-    scheduling_mode: str = "appointments"  # "appointments" | "queue"
+    scheduling_mode: str = Field("appointments", max_length=_SHORT_MAX)  # "appointments" | "queue"
     queue_avg_minutes: int = Field(15, ge=1, le=480)
 
 
 class StaffUpdate(BaseModel):
-    name: str | None = None
-    phone: str | None = None
-    bio: str | None = None
-    role: str | None = None
+    name: str | None = Field(None, max_length=_NAME_MAX)
+    phone: str | None = Field(None, max_length=_PHONE_MAX)
+    bio: str | None = Field(None, max_length=_BIO_MAX)
+    role: str | None = Field(None, max_length=_SHORT_MAX)
     can_set_own_hours: bool | None = None
     is_active: bool | None = None
     can_manage: bool | None = None
     is_provider: bool | None = None
-    scheduling_mode: str | None = None
+    scheduling_mode: str | None = Field(None, max_length=_SHORT_MAX)
     queue_avg_minutes: int | None = Field(None, ge=1, le=480)
 
 
@@ -76,9 +83,9 @@ class StaffSelfUpdate(BaseModel):
     """Fields a provider may change on their OWN record. Deliberately excludes
     every privilege/identity field (can_manage, is_provider, is_active, is_owner,
     role, phone) so a self-update can never escalate access or reassign a record."""
-    name: str | None = None
-    bio: str | None = None
-    scheduling_mode: str | None = None
+    name: str | None = Field(None, max_length=_NAME_MAX)
+    bio: str | None = Field(None, max_length=_BIO_MAX)
+    scheduling_mode: str | None = Field(None, max_length=_SHORT_MAX)
     queue_avg_minutes: int | None = Field(None, ge=1, le=480)
     service_ids: list[int] | None = None
 
@@ -104,8 +111,8 @@ class StaffOut(BaseModel):
 
 
 class SelfProviderCreate(BaseModel):
-    name: str | None = None  # defaults to the owner's account name
-    phone: str | None = None
+    name: str | None = Field(None, max_length=_NAME_MAX)  # defaults to the owner's account name
+    phone: str | None = Field(None, max_length=_PHONE_MAX)
     service_ids: list[int] = []
 
 
@@ -124,6 +131,25 @@ async def _get_owned_business(business_id: int, user: User, db: AsyncSession) ->
     if business.owner_id != user.id and user.role != "super_admin":
         raise HTTPException(status_code=403, detail="Forbidden")
     return business
+
+
+def _caller_is_owner(business: Business, user: User) -> bool:
+    """True for the business owner themselves (or a platform super_admin) — as
+    opposed to a desk-manager, who reaches the same endpoints through
+    authorize_business_access."""
+    return business.owner_id == user.id or user.role == "super_admin"
+
+
+def _guard_owner_record(staff: Staff, business: Business, user: User) -> None:
+    """A desk-manager runs the front desk; she must never edit or delete the
+    OWNER'S own provider record. Without this a secretary could rename it,
+    deactivate it, strip its services or delete it outright — locking the boss
+    out of his own schedule from an account he handed out. add_self_as_provider
+    is strict-owner-only for the same reason; this closes the other half."""
+    if staff.is_owner and not _caller_is_owner(business, user):
+        raise HTTPException(
+            status_code=403, detail="Only the business owner can change the owner's own profile."
+        )
 
 
 async def _staff_with_services(staff: Staff, db: AsyncSession) -> StaffOut:
@@ -263,11 +289,12 @@ async def update_staff(
     staff = await db.get(Staff, staff_id)
     if not staff or staff.business_id != business_id:
         raise HTTPException(status_code=404, detail="Staff not found")
+    _guard_owner_record(staff, business, user)
 
     updates = body.model_dump(exclude_none=True)
     # Only the owner may grant/revoke manager rights — drop can_manage from a
     # non-owner's (desk-manager's) update so she can't promote anyone (or herself).
-    caller_is_owner = business.owner_id == user.id or user.role == "super_admin"
+    caller_is_owner = _caller_is_owner(business, user)
     if not caller_is_owner:
         updates.pop("can_manage", None)
     for field, value in updates.items():
@@ -337,10 +364,11 @@ async def set_staff_services(
     db: AsyncSession = Depends(get_db),
 ):
     """Replace the full set of services assigned to a staff member."""
-    await authorize_business_access(business_id, user, db)
+    business = await authorize_business_access(business_id, user, db)
     staff = await db.get(Staff, staff_id)
     if not staff or staff.business_id != business_id:
         raise HTTPException(status_code=404, detail="Staff not found")
+    _guard_owner_record(staff, business, user)
 
     # Diff the assignment set instead of blanket delete-then-reinsert. A blanket
     # rewrite trips the uq_staff_services_staff_service unique constraint, because
@@ -385,10 +413,11 @@ async def delete_staff(
 
     Cascades handled automatically by the ORM (delete-orphan) for
     staff_services / working_hours / blocked_times; invites are cleared here."""
-    await authorize_business_access(business_id, user, db)
+    business = await authorize_business_access(business_id, user, db)
     staff = await db.get(Staff, staff_id)
     if not staff or staff.business_id != business_id:
         raise HTTPException(status_code=404, detail="Staff not found")
+    _guard_owner_record(staff, business, user)
     if staff.is_active:
         raise HTTPException(
             status_code=400,

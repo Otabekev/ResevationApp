@@ -8,6 +8,8 @@ F6: the BOT escapes user content before HTML messages too.
 F7: business text fields are length-bounded.
 F8: business NUMERIC settings are bounded, and the availability engine clamps
     the slot step even when the stored row is already out of range.
+F9: staff text fields are length-bounded, so an over-long value is a clean 422
+    instead of a column-overflow 500.
 """
 import asyncio
 import os
@@ -172,3 +174,52 @@ async def test_availability_survives_a_poisoned_slot_step(db):
         timeout=10,
     )
     assert len(slots) > 0, "clamped step should still produce a normal slot list"
+
+
+# ── F9: staff text fields are bounded ────────────────────────────────────────
+
+async def test_staff_create_rejects_oversized_strings(client, db):
+    """Every bound tracks a real column width (name 255, phone/role 20). Without
+    them the value sails through validation and dies at INSERT as a 500 — a free
+    error-log filler for anyone with a dashboard account."""
+    owner, biz = await _owner_biz(db)
+    for field, value in [
+        ("name", "n" * 256),
+        ("phone", "9" * 21),
+        ("role", "r" * 21),
+        ("bio", "b" * 1001),
+        ("scheduling_mode", "s" * 21),
+    ]:
+        body = {"name": "Ok", "service_ids": [], field: value}
+        resp = await client.post(
+            f"{API}/businesses/{biz.id}/staff", json=body, headers=auth_header(owner.id)
+        )
+        assert resp.status_code == 422, f"{field} of len {len(value)} accepted: {resp.text}"
+
+
+async def test_staff_update_rejects_oversized_strings(client, db):
+    owner, biz = await _owner_biz(db)
+    staff = await create_staff(db, business_id=biz.id)
+    for field, value in [("name", "n" * 256), ("phone", "9" * 21), ("bio", "b" * 1001)]:
+        resp = await client.patch(
+            f"{API}/businesses/{biz.id}/staff/{staff.id}",
+            json={field: value},
+            headers=auth_header(owner.id),
+        )
+        assert resp.status_code == 422, f"{field} of len {len(value)} accepted: {resp.text}"
+
+
+async def test_staff_create_accepts_realistic_values(client, db):
+    """The bounds must clear a real record — a full Uzbek name and a +998 number."""
+    owner, biz = await _owner_biz(db)
+    resp = await client.post(
+        f"{API}/businesses/{biz.id}/staff",
+        json={
+            "name": "Abdurahmonov Abdulaziz Abdurahmon o'g'li",
+            "phone": "+998901234567",
+            "bio": "Stomatolog, 12 yillik tajriba.",
+            "service_ids": [],
+        },
+        headers=auth_header(owner.id),
+    )
+    assert resp.status_code == 201, resp.text
