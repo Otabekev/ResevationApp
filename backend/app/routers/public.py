@@ -106,7 +106,12 @@ async def list_active_businesses(
 
 
 @router.get("/businesses/{business_id}/staff")
-@limiter.limit(_PUBLIC_READ_LIMIT)
+# shared_limit with a FIXED scope, not @limiter.limit: slowapi keys the bucket on
+# (rate_limit_key, scope), and with a plain limit the scope defaults to the
+# CONCRETE request path — so {business_id} makes every id its own bucket and an
+# attacker rotating the id sidesteps the cap entirely. A constant scope collapses
+# all ids into one bucket per caller, which is the ceiling we actually want.
+@limiter.shared_limit(_PUBLIC_READ_LIMIT, scope="public_staff")
 async def list_public_staff(
     business_id: int, request: Request, db: AsyncSession = Depends(get_db)
 ):
