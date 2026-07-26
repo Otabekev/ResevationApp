@@ -78,6 +78,14 @@ async def list_services(business_id: int, db: AsyncSession = Depends(get_db)):
     # Public/customer list (the bot). online_bookable=False services (e.g. a
     # dentist's multi-day treatment) are staff-scheduled only — never self-booked
     # — so they're hidden here. The owner dashboard uses /all (unfiltered).
+    #
+    # Gate on business status like the public staff roster does (public.py): a
+    # pending/suspended/blocked business isn't bookable, so its menu must not be
+    # readable by iterating ids on this unauthenticated route. Empty list, not
+    # 404, so a probe can't distinguish "no such id" from "not published".
+    biz = await db.get(Business, business_id)
+    if biz is None or biz.status not in ("active", "trial"):
+        return []
     result = await db.execute(
         select(Service)
         .where(
