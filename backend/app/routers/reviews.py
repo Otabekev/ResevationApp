@@ -9,6 +9,7 @@ from app.database import get_db
 from app.deps import require_bot_secret
 from app.limiter import limiter
 from app.models.booking import Booking, Customer, Review
+from app.models.business import Business
 
 router = APIRouter(tags=["reviews"])
 
@@ -82,6 +83,12 @@ async def create_review(
 
 @router.get("/businesses/{business_id}/reviews", response_model=list[ReviewPublic])
 async def get_business_reviews(business_id: int, db: AsyncSession = Depends(get_db)):
+    # Same public-surface gate as the service menu and staff roster (public.py):
+    # a pending/suspended/blocked business goes dark, so its customers' free-text
+    # comments aren't readable by iterating ids on this unauthenticated route.
+    biz = await db.get(Business, business_id)
+    if biz is None or biz.status not in ("active", "trial"):
+        return []
     result = await db.execute(
         select(Review).where(
             and_(Review.business_id == business_id, Review.is_visible == True)

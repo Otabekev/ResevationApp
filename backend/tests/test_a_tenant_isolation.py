@@ -107,6 +107,14 @@ async def test_public_reviews_hide_internal_ids(client, db):
     for leaky in ("customer_id", "booking_id", "id", "staff_id", "business_id"):
         assert leaky not in rows[0], f"public review leaked {leaky}"
 
+    # And the same status gate as the rest of the public surface: once the platform
+    # turns the business off, its review comments stop being enumerable by id.
+    for hidden in ("pending", "suspended", "blocked"):
+        biz.status = hidden
+        await db.commit()
+        gated = await client.get(f"{API}/businesses/{biz.id}/reviews")
+        assert gated.status_code == 200 and gated.json() == [], hidden
+
 
 # ── A4: admin user list must not leak password hashes ────────────────────────
 
