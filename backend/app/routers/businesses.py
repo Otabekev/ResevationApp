@@ -519,6 +519,15 @@ async def get_business_photo(
     """Public — serves the stored photo bytes. Cached hard/immutable because the
     URL carries a ?v=<updated-at> token that changes on every new upload, so a
     stale image is impossible while an unchanged one caches for a year."""
+    # A business the platform has TURNED OFF (suspended/blocked) must go dark on
+    # every public surface — don't keep serving its storefront image to anyone
+    # iterating ids. 'pending' stays viewable on purpose: the admin review queue
+    # and the owner's own Settings preview render it before approval, and the bot
+    # only ever requests active/trial photos anyway. Same 404 as a missing photo,
+    # so the status itself doesn't leak.
+    biz = await db.get(Business, business_id)
+    if biz is None or biz.status in ("suspended", "blocked"):
+        raise HTTPException(status_code=404, detail="No photo")
     photo = await db.get(BusinessPhoto, business_id)
     if photo is None:
         raise HTTPException(status_code=404, detail="No photo")

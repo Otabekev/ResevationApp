@@ -9,6 +9,8 @@ Business photo upload/serve/delete.
   V5. The public profile (what the Telegram bot reads) carries photo_url.
   V6. The anti-abuse byte ceiling returns 413.
   V7. Conditional GET (If-None-Match) returns 304 for an unchanged photo.
+  V9. A suspended/blocked business stops serving its photo (pending stays visible).
+  V10. The public service menu is gated on status the same way.
 """
 import io
 
@@ -138,3 +140,45 @@ async def test_v8_heic_iphone_photo_accepted(client, db):
     served = await client.get(f"{API}/businesses/{biz.id}/photo")
     assert served.status_code == 200
     assert served.content[:2] == b"\xff\xd8", "HEIC should be stored re-encoded as JPEG"
+
+
+# ── V9. Status gating: a platform-disabled business goes dark ────────────────
+
+async def test_v9_suspended_business_photo_goes_dark(client, db):
+    """A suspended/blocked business must stop serving its storefront image to
+    anyone iterating ids — same 404 as 'no photo' so the status itself doesn't
+    leak. 'pending' stays visible on purpose (admin review + owner preview)."""
+    owner, biz = await _make_owned_business(db, tid=7009)
+    files = {"file": ("store.png", _img_bytes(800, 600, "PNG"), "image/png")}
+    await client.put(f"{API}/businesses/{biz.id}/photo", files=files, headers=f.auth_header(owner.id))
+    assert (await client.get(f"{API}/businesses/{biz.id}/photo")).status_code == 200
+
+    for bad in ("suspended", "blocked"):
+        biz.status = bad
+        await db.commit()
+        assert (await client.get(f"{API}/businesses/{biz.id}/photo")).status_code == 404, bad
+
+    # Pending is still served — the admin approval queue renders it.
+    biz.status = "pending"
+    await db.commit()
+    assert (await client.get(f"{API}/businesses/{biz.id}/photo")).status_code == 200
+
+
+# ── V10. The public service menu is gated the same way ──────────────────────
+
+async def test_v10_public_services_hidden_for_unpublished_business(client, db):
+    """GET /businesses/{id}/services is the bot's customer menu. A non-bookable
+    business (pending/suspended/blocked) must return an empty menu, not leak its
+    services by id. The owner dashboard reads /services/all instead, so this
+    gate never touches onboarding."""
+    owner, biz = await _make_owned_business(db, tid=7010)
+    await f.create_service(db, business_id=biz.id, name="Cut")
+    # Active -> the menu is visible.
+    r = await client.get(f"{API}/businesses/{biz.id}/services")
+    assert r.status_code == 200 and len(r.json()) == 1
+
+    for hidden in ("pending", "suspended", "blocked"):
+        biz.status = hidden
+        await db.commit()
+        r = await client.get(f"{API}/businesses/{biz.id}/services")
+        assert r.status_code == 200 and r.json() == [], hidden
