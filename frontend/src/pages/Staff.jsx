@@ -203,6 +203,14 @@ export default function Staff() {
   const hasOwnerProvider = staffList.some((s) => s.is_owner);
   // Pin the owner's own provider profile to the top of the list.
   const orderedStaff = [...staffList].sort((a, b) => (b.is_owner === true) - (a.is_owner === true));
+  // The backend refuses any write to the OWNER's own provider row from a
+  // desk-manager (staff.py _guard_owner_record), and the "add myself" endpoint is
+  // owner-only. Don't render controls that are guaranteed to 403 — a dead button
+  // that errors reads as a broken app, not as "not your permission". Gate on the
+  // desk-manager role specifically (fail OPEN): an unknown/legacy access_role then
+  // renders exactly as before, so no real owner loses their own controls.
+  const isDeskManager = activeBusiness?.access_role === "manager";
+  const lockOwnerRow = (s) => s.is_owner && isDeskManager;
 
   return (
     <div className="animate-in">
@@ -212,7 +220,7 @@ export default function Staff() {
           <p className="page-subtitle">{t("staff_subtitle")}</p>
         </div>
         <div className="row" style={{ gap: "var(--space-2)", flexWrap: "wrap" }}>
-          {!hasOwnerProvider && (
+          {!hasOwnerProvider && !isDeskManager && (
             <button className="btn btn-secondary" onClick={handleAddSelf}>
               <IconPlus size={17} /> {t("add_myself_provider")}
             </button>
@@ -277,9 +285,11 @@ export default function Staff() {
                       <IconLink size={16} />
                     </button>
                   )}
-                  <button className="btn btn-secondary btn-sm btn-icon" title={t("edit")} aria-label={t("edit")} onClick={() => openEdit(s)}>
-                    <IconEdit size={16} />
-                  </button>
+                  {!lockOwnerRow(s) && (
+                    <button className="btn btn-secondary btn-sm btn-icon" title={t("edit")} aria-label={t("edit")} onClick={() => openEdit(s)}>
+                      <IconEdit size={16} />
+                    </button>
+                  )}
                   {/* Delete only appears once the staff is stopped — deactivate is
                       the reversible cleanup, delete is the final one. Owners can't
                       delete themselves as a provider. */}
@@ -303,12 +313,17 @@ export default function Staff() {
                   {services.length === 0 && <span className="form-hint">{t("no_services_title")}</span>}
                   {services.map((svc) => {
                     const assigned = (s.service_ids || []).includes(svc.id);
+                    const locked = lockOwnerRow(s);
                     return (
                       <button
                         key={svc.id}
                         type="button"
                         className={`service-toggle${assigned ? " on" : ""}`}
-                        onClick={() => handleToggleService(s.id, svc.id, s.service_ids || [])}
+                        disabled={locked}
+                        // Read-only for a desk-manager on the owner's row: the PUT
+                        // would 403. Dim it so it reads as "not editable", not dead.
+                        style={locked ? { opacity: 0.55, cursor: "not-allowed" } : undefined}
+                        onClick={locked ? undefined : () => handleToggleService(s.id, svc.id, s.service_ids || [])}
                       >
                         {assigned && <IconCheck size={13} />}
                         {svc[`name_${lang}`] || svc.name_uz}

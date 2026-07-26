@@ -1,6 +1,14 @@
 <!doctype html>
 <html lang="uz">
   <head>
+    <!-- csp-precache-bump: this app is a Workbox PWA that serves index.html from
+         Cache Storage, headers included. A CSP change lives in vercel.json, which
+         leaves the built HTML byte-identical, so the precache revision (a hash of
+         this file) never rotates and installed clients keep replaying the OLD
+         cached response with the OLD CSP. Editing this file changes its bytes →
+         new revision → new sw.js → clients update and re-fetch with the new
+         header. Bump the number when a header-only security change must reach
+         already-installed home-screen users. Bump #1 (CSP hardening, 2026-07). -->
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
     <meta name="theme-color" content="#0C6E56" />
