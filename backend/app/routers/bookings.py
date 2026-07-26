@@ -555,8 +555,10 @@ async def create_manual_booking(
 # full availability computation and its own commit. It's manager-authenticated,
 # so this keys per-user — a ceiling well above any real "book a treatment course"
 # action, but low enough that a compromised dashboard account can't spin the loop
-# on repeat to load the DB.
-@limiter.limit("20/minute")
+# on repeat to load the DB. shared_limit (fixed scope) so the {business_id} path
+# param doesn't split the cap into a separate bucket per business — a manager of
+# several businesses would otherwise get N× the intended ceiling.
+@limiter.shared_limit("20/minute", scope="treatment_plan")
 async def create_treatment_plan(
     request: Request,
     business_id: int,

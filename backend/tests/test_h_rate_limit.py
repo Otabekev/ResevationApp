@@ -158,3 +158,16 @@ async def test_public_launch_status_enforces_a_ceiling(limited_client):
     # Everything before the first 429 is a 200 (a clean ceiling, not flapping).
     first_429 = codes.index(429)
     assert set(codes[:first_429]) == {200}
+
+
+async def test_public_staff_cap_is_not_bypassed_by_rotating_business_id(limited_client):
+    """The bucket must NOT be per-{business_id}. With a plain @limiter.limit the
+    scope defaults to the concrete path, so incrementing the id mints a fresh
+    120/min bucket each time and the cap is decorative. shared_limit(scope=...)
+    collapses every id into one bucket per caller, so rotating the id past the
+    ceiling still 429s."""
+    codes = [
+        (await limited_client.get(f"/api/v1/public/businesses/{i}/staff")).status_code
+        for i in range(1, 140)
+    ]
+    assert 429 in codes, "rotating business_id bypassed the cap — scope is per-path, not fixed"
