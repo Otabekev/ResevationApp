@@ -82,6 +82,28 @@ def test_frontend_csp_keeps_script_src_locked_and_telegram_embed():
     assert "'unsafe-eval'" not in csp and "'unsafe-inline'" not in csp.split("style-src")[0], \
         "no unsafe-* on script-src"
     assert "object-src 'none'" in csp
-    # The map preview iframe and the Telegram web embed must remain allowed.
-    assert "frame-src 'self' https://www.openstreetmap.org" in csp
+    # The map preview iframe and the Telegram web embed must remain allowed. Both
+    # OSM hosts (www + apex) so a host redirect on their side can't blank the map.
+    assert "https://www.openstreetmap.org" in csp and "https://openstreetmap.org" in csp
     assert "frame-ancestors 'self' https://web.telegram.org" in csp
+
+
+def test_html_shell_has_no_inline_script_so_script_src_self_holds():
+    """The one regression that would white-screen production under script-src
+    'self': an inline <script> added to the shell (an analytics pixel, a
+    theme-flash guard). The build succeeds, CI stays green, and the page dies on
+    deploy. Guard the code against the policy, not just the policy against the code."""
+    import os
+    import re
+
+    index_html = os.path.join(
+        os.path.dirname(__file__), "..", "..", "frontend", "index.html"
+    )
+    with open(index_html, encoding="utf-8") as fh:
+        html = fh.read()
+    # A <script> tag with no src= attribute is an inline script.
+    inline = re.search(r"<script(?![^>]*\ssrc=)[^>]*>", html)
+    assert inline is None, f"inline <script> in the shell breaks script-src 'self': {inline.group(0) if inline else ''}"
+    # And the precache-bump marker must survive: it's what makes a header-only CSP
+    # change reach already-installed PWA clients (see the comment in index.html).
+    assert "csp-precache-bump" in html
