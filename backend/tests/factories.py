@@ -60,11 +60,12 @@ async def create_service(db, *, business_id, duration_minutes=30, name="Cut") ->
 
 async def create_staff(
     db, *, business_id, user_id=None, name="Barber",
-    can_manage=False, is_provider=True, is_active=True,
+    can_manage=False, is_provider=True, is_active=True, is_owner=False,
 ) -> Staff:
     staff = Staff(
         business_id=business_id, user_id=user_id, name=name,
         can_manage=can_manage, is_provider=is_provider, is_active=is_active,
+        is_owner=is_owner,
     )
     db.add(staff)
     await db.commit()
