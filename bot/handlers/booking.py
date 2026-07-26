@@ -737,7 +737,8 @@ async def date_chosen(callback: CallbackQuery, state: FSMContext) -> None:
 
     try:
         slots = await api_client.get_available_slots(
-            business_id, service_id, date_str, staff_id, service_ids=service_ids
+            business_id, service_id, date_str, staff_id, service_ids=service_ids,
+            telegram_id=callback.from_user.id,
         )
     except Exception:
         await callback.message.answer(t("server_error", lang))

@@ -21,6 +21,20 @@ _client = httpx.AsyncClient(
 )
 
 
+def _bot_headers(telegram_id: int | None = None) -> dict[str, str]:
+    """Headers for a backend call the bot makes on a user's behalf.
+
+    X-Bot-User names the end user so the backend rate-limits per Telegram user.
+    Without it every user shares one bucket keyed on the bot's egress IP, and a
+    single chatty user throttles the whole platform. The backend only trusts the
+    header when X-Bot-Secret checks out, so send them together.
+    """
+    headers = {"X-Bot-Secret": BOT_SECRET}
+    if telegram_id is not None:
+        headers["X-Bot-User"] = str(telegram_id)
+    return headers
+
+
 def absolute_media_url(url: str | None) -> str | None:
     """Make a backend-relative media URL (e.g. '/api/v1/businesses/5/photo?v=1')
     absolute so Telegram can fetch it by URL. The backend returns a relative photo
@@ -44,6 +58,7 @@ async def auth_user(telegram_id: int, name: str, username: str | None, language:
             "language": language,
             "bot_secret": BOT_SECRET,
         },
+        headers=_bot_headers(telegram_id),
     )
     resp.raise_for_status()
     return resp.json()
@@ -60,6 +75,7 @@ async def complete_location_share(nonce: str, latitude: float, longitude: float)
             "longitude": longitude,
             "bot_secret": BOT_SECRET,
         },
+        headers=_bot_headers(),
     )
     resp.raise_for_status()
     return resp.json()
@@ -80,6 +96,7 @@ async def complete_web_login(
             "language": language,
             "bot_secret": BOT_SECRET,
         },
+        headers=_bot_headers(telegram_id),
     )
     resp.raise_for_status()
     return resp.json()
@@ -135,6 +152,7 @@ async def get_launch_status(telegram_id: int) -> dict:
     resp = await _client.get(
         f"{BACKEND_URL}/public/launch-status",
         params={"telegram_id": telegram_id},
+        headers=_bot_headers(telegram_id),
     )
     resp.raise_for_status()
     return resp.json()
@@ -146,6 +164,7 @@ async def get_available_slots(
     date_str: str,
     staff_id: int | None = None,
     service_ids: list[int] | None = None,
+    telegram_id: int | None = None,
 ) -> list[dict]:
     params: dict = {"business_id": business_id, "service_id": service_id, "date": date_str}
     if staff_id:
@@ -154,7 +173,9 @@ async def get_available_slots(
         # httpx serializes a list value as repeated query params
         # (?service_ids=1&service_ids=2) → multi-service combined-duration slots.
         params["service_ids"] = service_ids
-    resp = await _client.get(f"{BACKEND_URL}/availability", params=params)
+    resp = await _client.get(
+        f"{BACKEND_URL}/availability", params=params, headers=_bot_headers(telegram_id)
+    )
     resp.raise_for_status()
     return resp.json()
 
@@ -163,7 +184,7 @@ async def create_booking(payload: dict) -> dict:
     resp = await _client.post(
         f"{BACKEND_URL}/bookings/public",
         json=payload,
-        headers={"X-Bot-Secret": BOT_SECRET},
+        headers=_bot_headers(payload.get("telegram_id")),
     )
     if resp.status_code == 409:
         raise ValueError(resp.json().get("detail", "Slot unavailable"))
@@ -175,7 +196,8 @@ async def create_booking(payload: dict) -> dict:
 
 async def join_queue(payload: dict) -> dict:
     resp = await _client.post(
-        f"{BACKEND_URL}/public/queue/join", json=payload, headers={"X-Bot-Secret": BOT_SECRET}
+        f"{BACKEND_URL}/public/queue/join", json=payload,
+        headers=_bot_headers(payload.get("telegram_id")),
     )
     if resp.status_code == 400:
         raise ValueError(resp.json().get("detail", "Cannot join"))
@@ -185,7 +207,7 @@ async def join_queue(payload: dict) -> dict:
 
 async def queue_status(entry_id: int) -> dict:
     resp = await _client.get(
-        f"{BACKEND_URL}/public/queue/status/{entry_id}", headers={"X-Bot-Secret": BOT_SECRET}
+        f"{BACKEND_URL}/public/queue/status/{entry_id}", headers=_bot_headers()
     )
     resp.raise_for_status()
     return resp.json()
@@ -193,7 +215,7 @@ async def queue_status(entry_id: int) -> dict:
 
 async def queue_leave(entry_id: int) -> dict:
     resp = await _client.post(
-        f"{BACKEND_URL}/public/queue/leave/{entry_id}", headers={"X-Bot-Secret": BOT_SECRET}
+        f"{BACKEND_URL}/public/queue/leave/{entry_id}", headers=_bot_headers()
     )
     resp.raise_for_status()
     return resp.json()
@@ -201,7 +223,7 @@ async def queue_leave(entry_id: int) -> dict:
 
 async def queue_confirm(entry_id: int) -> dict:
     resp = await _client.post(
-        f"{BACKEND_URL}/public/queue/confirm/{entry_id}", headers={"X-Bot-Secret": BOT_SECRET}
+        f"{BACKEND_URL}/public/queue/confirm/{entry_id}", headers=_bot_headers()
     )
     resp.raise_for_status()
     return resp.json()
@@ -231,7 +253,7 @@ async def submit_review(telegram_id: int, booking_id: int, rating: int, comment:
     resp = await _client.post(
         f"{BACKEND_URL}/reviews",
         json={"booking_id": booking_id, "rating": rating, "comment": comment, "telegram_id": telegram_id},
-        headers={"X-Bot-Secret": BOT_SECRET},
+        headers=_bot_headers(telegram_id),
     )
     resp.raise_for_status()
     return resp.json()
