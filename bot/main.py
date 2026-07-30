@@ -3,6 +3,7 @@ import logging
 
 from aiogram import Bot, Dispatcher
 from aiogram.client.default import DefaultBotProperties
+from aiogram.client.session.aiohttp import AiohttpSession
 from aiogram.enums import ParseMode
 from aiogram.fsm.storage.redis import RedisStorage
 from aiogram.types import BotCommand, ErrorEvent, MenuButtonCommands
@@ -36,7 +37,23 @@ async def main() -> None:
             "retry_on_timeout": True,      # reconnect+retry once instead of surfacing a transient error
         },
     )
-    bot = Bot(token=BOT_TOKEN, default=DefaultBotProperties(parse_mode=ParseMode.HTML))
+    # The Telegram connection must FAIL FAST. Railway's egress silently kills
+    # long-lived connections to api.telegram.org; with aiogram's default 60s
+    # session timeout, getUpdates then black-holes for 60+10s PER ATTEMPT while
+    # taps queue at Telegram — users saw the language button freeze for minutes,
+    # then every queued tap arrive in one batch (confirmed in the Railway logs:
+    # "Failed to fetch updates - TelegramNetworkError: Request timeout error",
+    # and paired updates handled in the same second after long gaps).
+    #   timeout=20   → a dead getUpdates is noticed in ≤30s (20 + 10s long-poll),
+    #                  and every send/edit is bounded at 20s instead of 60.
+    #   force_close  → a fresh connection per request, so a NAT-killed socket can
+    #                  never be REUSED for the next poll or send. At our volume
+    #                  the extra TLS handshake (~0.2s) is invisible.
+    # _connector_init is private aiogram API — fine while aiogram==3.15.0 is
+    # pinned in requirements.txt; re-check this line on any aiogram upgrade.
+    session = AiohttpSession(timeout=20)
+    session._connector_init["force_close"] = True
+    bot = Bot(token=BOT_TOKEN, session=session, default=DefaultBotProperties(parse_mode=ParseMode.HTML))
     dp = Dispatcher(storage=storage)
 
     dp.include_router(start.router)

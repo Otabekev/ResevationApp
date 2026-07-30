@@ -33,14 +33,25 @@ def _fire_and_forget(coro) -> None:
     task.add_done_callback(_bg_tasks.discard)
 
 
-async def _persist_language(token: str, language: str) -> None:
+async def _persist_language(tg_user, language: str, token: str | None) -> None:
     """Best-effort, off the critical path: tell the backend the user's language
-    so notifications match. Cosmetic — the FSM language is already set and every
-    /start re-syncs it via /auth/bot. A stale token (entering via the docked
-    button long after /start) makes this 401; firing it in the background means
-    that never costs the user a wasted round-trip before their screen loads."""
+    so notifications/reminders match. The FSM language is already set either way.
+    A stale token (entering via the docked button long after /start) used to 401
+    here and silently LOSE the change — /auth/bot only sets language at user
+    creation, so nothing else would ever correct it and reminders kept arriving
+    in the old language. On a dead or missing token, re-auth for a fresh one and
+    retry once. Still fire-and-forget: the user's screen never waits on this."""
     try:
-        await api_client.update_language(token, language)
+        if token:
+            try:
+                await api_client.update_language(token, language)
+                return
+            except Exception:
+                pass  # stale/expired token — fall through to re-auth
+        auth = await api_client.auth_user(
+            tg_user.id, tg_user.full_name, tg_user.username, language
+        )
+        await api_client.update_language(auth["access_token"], language)
     except Exception:
         pass
 
@@ -366,6 +377,15 @@ async def settings_menu(callback: CallbackQuery, state: FSMContext) -> None:
 
 @router.callback_query(F.data.startswith("setlang_"))
 async def set_language(callback: CallbackQuery, state: FSMContext) -> None:
+    # Release the spinner BEFORE any Redis/backend work — same convention as
+    # book_start. Wrapped because after a polling stall this tap can arrive
+    # minutes late, when the query id is already expired and answer() raises;
+    # an old spinner must never abort the actual screen render below.
+    try:
+        await callback.answer()
+    except Exception:
+        pass
+
     new_lang = callback.data.split("_", 1)[1]
     if new_lang not in ("uz", "ru", "en"):
         new_lang = "uz"
@@ -374,9 +394,7 @@ async def set_language(callback: CallbackQuery, state: FSMContext) -> None:
     # Persist to the backend so reminders/notifications switch language too —
     # in the background, so the user's next screen never waits on this call.
     data = await state.get_data()
-    token = data.get("access_token")
-    if token:
-        _fire_and_forget(_persist_language(token, new_lang))
+    _fire_and_forget(_persist_language(callback.from_user, new_lang, data.get("access_token")))
 
     # Route on after the language pick: launch button → category list; booking
     # deep-link → that business's card; otherwise → the main menu.
@@ -385,7 +403,6 @@ async def set_language(callback: CallbackQuery, state: FSMContext) -> None:
         from handlers import booking
         if not await booking._booking_open(callback.from_user.id):
             await callback.message.edit_text(t("prelaunch_wait", new_lang))
-            await callback.answer()
             return
         text, kb = await booking._categories_view(new_lang)
         # On a backend blip _categories_view returns (None, None); without a
@@ -401,7 +418,6 @@ async def set_language(callback: CallbackQuery, state: FSMContext) -> None:
         from handlers import booking
         if not await booking._booking_open(callback.from_user.id):
             await callback.message.edit_text(t("prelaunch_wait", new_lang))
-            await callback.answer()
             return
         biz_id = data["business_id"]
         rows = [[InlineKeyboardButton(text=t("book_appointment", new_lang), callback_data=f"biz_{biz_id}")]]
@@ -461,7 +477,6 @@ async def set_language(callback: CallbackQuery, state: FSMContext) -> None:
             parse_mode="HTML",
             reply_markup=main_menu_keyboard(new_lang),
         )
-    await callback.answer()
 
 
 @router.callback_query(F.data == "main_menu")

@@ -69,7 +69,13 @@ async def show_my_bookings(callback: CallbackQuery, state: FSMContext) -> None:
                 [InlineKeyboardButton(text=t("back", lang), callback_data="main_menu")]
             ]),
         )
-        await callback.answer()
+        # May be the SECOND answer (set_language delegates here after answering
+        # up front) or an expired query after a polling stall — never let either
+        # raise past a fully rendered screen.
+        try:
+            await callback.answer()
+        except Exception:
+            pass
         return
 
     text = t("upcoming_bookings", lang) + "\n\n"
@@ -97,7 +103,10 @@ async def show_my_bookings(callback: CallbackQuery, state: FSMContext) -> None:
         parse_mode="HTML",
         reply_markup=InlineKeyboardMarkup(inline_keyboard=rows),
     )
-    await callback.answer()
+    try:
+        await callback.answer()
+    except Exception:
+        pass
 
 
 @router.callback_query(F.data.startswith("cancel_ask_"))
