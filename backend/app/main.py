@@ -115,7 +115,10 @@ app.add_middleware(
     allow_origins=settings.cors_origins,
     allow_credentials=True,
     allow_methods=["GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"],
-    allow_headers=["Authorization", "Content-Type", "X-Request-ID", "X-Bot-Secret"],
+    # X-Growth-Secret: the investor map (separate origin) authenticates with a
+    # header instead of ?secret= — without it here the browser's CORS preflight
+    # rejects the fetch and the map silently falls back to its demo sample.
+    allow_headers=["Authorization", "Content-Type", "X-Request-ID", "X-Bot-Secret", "X-Growth-Secret"],
 )
 
 # ── Routers ──────────────────────────────────────────────────────────────────
